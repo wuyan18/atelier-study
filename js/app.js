@@ -345,7 +345,16 @@ export function route() {
         { label: courseNode ? courseNode.name : (seg[0] || "课程"), href: seg.length > 1 ? `#/course/${encodeURIComponent(seg[0])}` : "#/" },
         { label: seg[seg.length - 1] || path },
       ]);
-      arg = { node: findNode(path), page: parseInt(p.page, 10) || 1, path };
+      // 分屏参数：split= 第二份文件，splitpage= 其起始页
+      let splitNode = null;
+      if (p.split) {
+        splitNode = findNode(p.split);
+        if (!splitNode) toast(`分屏文件不存在，已忽略：${p.split}`);
+      }
+      arg = {
+        node: findNode(path), page: parseInt(p.page, 10) || 1, path,
+        split: splitNode, splitPage: parseInt(p.splitpage, 10) || 1,
+      };
       if (!arg.node) throw new Error("找不到文件：" + path);
     } else if ((m = h.match(/^#\/compare\??(.*)$/))) {
       name = "compare";
@@ -377,7 +386,7 @@ export function route() {
 
     applyRouteShell(name);
     const R = async () => {
-      if (name === "read") { setTitle(arg.node.name); await renderReader(main, arg.node, arg.page); }
+      if (name === "read") { setTitle(arg.node.name); await renderReader(main, arg.node, arg.page, { splitNode: arg.split, splitPage: arg.splitPage }); }
       else if (name === "compare") { setTitle(arg.node.name + " · 对照"); await renderCompare(main, arg.node, arg.dir); }
       else if (name === "search") { setTitle("全文搜索"); await renderSearch(main, arg); }
       else if (name === "course") { await renderCourse(main, arg, arg.rel); }

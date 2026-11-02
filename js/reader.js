@@ -1,6 +1,6 @@
-/* reader.js — Atelier Study：PDF 阅读器（懒渲染、文字层、页内搜索、缩放、大纲侧栏） */
+/* reader.js — Atelier Study：PDF 阅读器（懒渲染、文字层、页内搜索、缩放、大纲侧栏、分屏） */
 import * as pdfjsLib from "/vendor/pdfjs/pdf.min.mjs";
-import { G, setProgress, getProgress, toast, setTitle, fmtSize, findNode } from "./app.js";
+import { G, setProgress, getProgress, toast, setTitle, fmtSize, findNode, esc } from "./app.js";
 import { createViewerFor } from "./viewers.js";
 import { onPaneScroll } from "./assignment.js";
 import {
@@ -24,11 +24,33 @@ function svgIco(sym, cls = "") {
   return `<svg class="ico ${cls}" aria-hidden="true"><use href="#${sym}"/></svg>`;
 }
 
-export async function renderReader(main, node, initialPage) {
+/* 分屏链接：#/read?path=…&page=…&split=…&splitpage=… */
+function splitHash(rel, page, splitRel, splitPage) {
+  let h = `#/read?path=${encodeURIComponent(rel)}`;
+  if (page && page > 1) h += `&page=${page}`;
+  if (splitRel) {
+    h += `&split=${encodeURIComponent(splitRel)}`;
+    if (splitPage && splitPage > 1) h += `&splitpage=${splitPage}`;
+  }
+  return h;
+}
+
+/* 打开资料选择器，选一份文件与当前文件并排（分屏） */
+function pickSplitFile(currentRel, currentPage, onExit) {
+  pickFile(collectReadableFiles(G.tree), f => {
+    if (f.rel === currentRel) { toast("分屏文件与当前文件相同，已取消"); return; }
+    const prog = getProgress(f.rel);          // 分屏文件若有历史进度则恢复
+    location.hash = splitHash(currentRel, currentPage, f.rel, prog && prog.page ? prog.page : 1);
+  });
+  if (onExit) onExit();
+}
+
+export async function renderReader(main, node, initialPage, opts = {}) {
   if (node.type === "dir") throw new Error("不能直接打开目录");
 
   /* --- 非 PDF：统一文档阅读器（Markdown / DOCX / 代码 / 图片 / ZIP / 未知） --- */
   if (!/\.pdf$/i.test(node.name)) {
+    const splitting = !!opts.splitNode;
     main.className = "doc-page";
     main.innerHTML = `
       <div class="reader-tabs" id="reader-tabs"></div>
@@ -38,10 +60,13 @@ export async function renderReader(main, node, initialPage) {
         <span class="rt-meta"><span class="t-title">${node.name}</span><span class="t-course">课程资料 · 阅读器</span></span>
         <span class="d-tag">${node.ext || "FILE"}</span>
         <span class="t-spacer"></span>
+        <button class="btn ghost d-split${splitting ? " active" : ""}" id="d-split" title="再开一份资料并排阅读">${svgIco("i-layout-cols")}<span>分屏</span></button>
         <button class="btn ghost d-reveal" id="d-reveal">${svgIco("i-reveal")}<span>目录</span></button>
         <button class="btn ghost d-sysopen" id="d-sysopen">${svgIco("i-external")}<span>系统</span></button>
       </div>
-      <div class="doc-body"><div class="doc-loading loading"></div></div>`;
+      <div class="doc-body${splitting ? " has-split" : ""}">
+        ${splitting ? `<div class="doc-main"></div><section class="split-pane" id="split-pane"></section>` : `<div class="doc-loading loading"></div>`}
+      </div>`;
     openTab(node);
     setActive(node.rel);
     const paintTabs = initTabs(main.querySelector("#reader-tabs"), node);
@@ -49,10 +74,14 @@ export async function renderReader(main, node, initialPage) {
     main.querySelector("#d-back").addEventListener("click", () => history.back());
     main.querySelector("#d-reveal").addEventListener("click", () => openPathFallback(node.rel, "reveal"));
     main.querySelector("#d-sysopen").addEventListener("click", () => openPathFallback(node.rel, "open"));
+    main.querySelector("#d-split").addEventListener("click", () => {
+      if (opts.splitNode) location.hash = splitHash(node.rel, 0, null, 0);   // 退出分屏
+      else pickSplitFile(node.rel, 0);
+    });
     setTitle(node.name);
     try {
       const viewer = createViewerFor(node);
-      const container = main.querySelector(".doc-body");
+      const container = splitting ? main.querySelector(".doc-main") : main.querySelector(".doc-body");
       // 同目录文件列表（树节点无 parent 指针，从 G.tree 反查父目录）
       const dirRel = node.rel.includes("/") ? node.rel.slice(0, node.rel.lastIndexOf("/")) : "";
       const dirNode = dirRel ? findNode(dirRel) : null;
@@ -60,20 +89,45 @@ export async function renderReader(main, node, initialPage) {
       await viewer.mount(container, node, siblings);
     } catch (err) {
       console.error(err);
-      main.querySelector(".doc-body").innerHTML = `
+      const host = main.querySelector(".doc-main") || main.querySelector(".doc-body");
+      host.innerHTML = `
         <div class="error-card"><h3>无法打开此文件</h3><p>${err.message}</p>
         <button class="btn primary" id="err-sysopen">${svgIco("i-external")}使用系统程序打开</button></div>`;
       main.querySelector("#err-sysopen").addEventListener("click", () => openPathFallback(node.rel, "open"));
     }
-    return () => { /* viewer cleanup 由各自 mount 返回值挂在 container 上 */ };
+    /* 右侧分屏 */
+    let splitViewer = null;
+    if (opts.splitNode) {
+      openTab(opts.splitNode, opts.splitPage);
+      setActive(node.rel);          // openTab 会把 active 指到分屏文件，拨回主文件
+      paintTabs();
+      const rec = await mountSplitPane(main.querySelector("#split-pane"), opts.splitNode, {
+        initialPage: opts.splitPage,
+        onClose: () => { location.hash = splitHash(node.rel, 0, null, 0); },
+        onChange: () => pickSplitFile(node.rel, 0),
+      }).catch(err => { console.error(err); toast("分屏文件打开失败：" + err.message); return null; });
+      splitViewer = rec && rec.viewer ? rec.viewer : null;
+    }
+    const tabHost2 = main.querySelector("#reader-tabs");
+    const syncSplitTab = () => {
+      if (!splitViewer || !splitViewer.pdf) return;
+      remember(opts.splitNode.rel, { page: splitViewer.currentPage, scale: splitViewer.scale });
+      const el = tabHost2 && tabHost2.querySelector(`.rtab[data-rel="${CSS.escape(opts.splitNode.rel)}"] .rtab-page`);
+      if (el) el.textContent = "p" + splitViewer.currentPage;
+    };
+    if (splitViewer) { splitViewer.syncTab = syncSplitTab; syncSplitTab(); }
+    return () => { if (splitViewer) splitViewer.destroy(); };
   }
 
   /* --- PDF --- */
+  const splitting = !!opts.splitNode;
   main.className = "reader";
   main.innerHTML = `
     <div class="reader-root">
       <div class="reader-tabs" id="reader-tabs"></div>
-      <div class="reader-body"><div class="pdf-scroll" id="pdf-scroll"><div class="pdf-pages" id="pdf-pages"></div></div></div>
+      <div class="reader-body${splitting ? " has-split" : ""}"><div class="pdf-scroll" id="pdf-scroll"><div class="pdf-pages" id="pdf-pages"></div></div>
+        ${splitting ? `<section class="split-pane" id="split-pane"></section>` : ""}
+      </div>
     </div>`;
   const holder = main.querySelector(".reader-root");
   const tabHost = main.querySelector("#reader-tabs");
@@ -87,28 +141,105 @@ export async function renderReader(main, node, initialPage) {
   const paintTabs = initTabs(tabHost, node);
   paintTabs();
 
-  await viewer.load().catch(err => {
+  /* 分屏：主工具栏按钮 */
+  viewer.onSplitToggle = () => {
+    if (opts.splitNode) location.hash = splitHash(node.rel, viewer.currentPage, null, 0);
+    else pickSplitFile(node.rel, viewer.currentPage);
+  };
+
+  /* 右侧分屏面板（与主文件加载并行，谁慢都不挡首屏） */
+  let splitViewer = null;
+  if (opts.splitNode) {
+    // load() 期间就会 replaceState，先给一个基础版本保住 split 参数
+    viewer.urlBuilder = page => splitHash(node.rel, page, opts.splitNode.rel, opts.splitPage || 1);
+  }
+  const mainLoad = viewer.load().catch(err => {
     console.error(err);
     holder.innerHTML = `
       <div class="error-card"><h3>PDF 加载失败</h3><p>${err.message}</p>
       <button class="btn primary" id="err-sysopen">${svgIco("i-external")}使用系统程序打开</button></div>`;
-    holder.querySelector("#err-sysopen").addEventListener("click", () => openPathFallback(node.rel, "open"));
+    const btn = holder.querySelector("#err-sysopen");
+    if (btn) btn.addEventListener("click", () => openPathFallback(node.rel, "open"));
   });
+  if (opts.splitNode) {
+    openTab(opts.splitNode, opts.splitPage);
+    setActive(node.rel);            // openTab 会把 active 指到分屏文件，拨回主文件
+    paintTabs();
+    const rec = await mountSplitPane(main.querySelector("#split-pane"), opts.splitNode, {
+      initialPage: opts.splitPage,
+      onClose: () => { location.hash = splitHash(node.rel, viewer.currentPage, null, 0); },
+      onChange: () => pickSplitFile(node.rel, viewer.currentPage),
+    }).catch(err => { console.error(err); toast("分屏文件打开失败：" + err.message); return null; });
+    splitViewer = rec && rec.viewer ? rec.viewer : null;
+    /* 主文件的 hash 更新需携带 split 参数（滚动/翻页 replaceState 时保留分屏状态） */
+    viewer.urlBuilder = page => {
+      const sp = splitViewer && splitViewer.pdf ? splitViewer.currentPage : (opts.splitPage || 1);
+      return splitHash(node.rel, page, opts.splitNode.rel, sp);
+    };
+  }
+  const splitBtn = holder.querySelector(".r-split");
+  if (splitBtn) splitBtn.classList.toggle("active", splitting);
+  await mainLoad;
 
   // 标签上的页码随阅读进度更新
   const syncTab = () => {
     if (!viewer || !viewer.pdf) return;
     remember(node.rel, { page: viewer.currentPage, scale: viewer.scale });
+    setProgress(node.rel, viewer.currentPage, viewer.pdf.numPages);   // 主文件进度落盘（最近阅读）
     const el = tabHost.querySelector(`.rtab[data-rel="${CSS.escape(node.rel)}"] .rtab-page`);
     if (el) el.textContent = "p" + viewer.currentPage;
+    if (splitViewer && splitViewer.pdf) {
+      remember(opts.splitNode.rel, { page: splitViewer.currentPage, scale: splitViewer.scale });
+      setProgress(opts.splitNode.rel, splitViewer.currentPage, splitViewer.pdf.numPages);   // 分屏文件进度落盘
+      const el2 = tabHost.querySelector(`.rtab[data-rel="${CSS.escape(opts.splitNode.rel)}"] .rtab-page`);
+      if (el2) el2.textContent = "p" + splitViewer.currentPage;
+    }
   };
   const tabTimer = setInterval(syncTab, 1200);
 
   return () => {
     clearInterval(tabTimer);
     syncTab();
+    if (splitViewer) splitViewer.destroy();
     viewer.destroy();
   };
+}
+
+/* ================================================================
+ * 分屏面板：右侧与主文件并排的第二份资料
+ * PDF → PdfViewer pane 模式（独立翻页/缩放）；其他 → 文档 viewer
+ * ================================================================ */
+async function mountSplitPane(paneEl, fileNode, { initialPage = 1, onClose, onChange }) {
+  if (!paneEl) throw new Error("分屏容器不存在");
+  paneEl.innerHTML = `
+    <div class="split-pane-label">
+      <span class="pane-tag s">对照</span>
+      <span class="pane-file" title="${esc(fileNode.rel)}">${esc(fileNode.name)}</span>
+      <button class="tb-icon-btn sp-change" title="更换分屏文件">${svgIco("i-refresh")}</button>
+      <button class="tb-icon-btn sp-close" title="关闭分屏">${svgIco("i-x")}</button>
+    </div>
+    <div class="pane-holder"></div>`;
+  paneEl.querySelector(".sp-close").addEventListener("click", () => onClose && onClose());
+  paneEl.querySelector(".sp-change").addEventListener("click", () => onChange && onChange());
+  const holder = paneEl.querySelector(".pane-holder");
+
+  if (/\.pdf$/i.test(fileNode.name)) {
+    const v = new PdfViewer(paneEl, fileNode, initialPage, "pane");
+    await v.load();
+    return { viewer: v };
+  }
+  holder.classList.add("scrollable");
+  try {
+    const viewer = createViewerFor(fileNode);
+    const dirRel = fileNode.rel.includes("/") ? fileNode.rel.slice(0, fileNode.rel.lastIndexOf("/")) : "";
+    const dirNode = dirRel ? findNode(dirRel) : null;
+    const siblings = dirNode ? dirNode.children.filter(c => c.type === "file") : [];
+    await viewer.mount(holder, fileNode, siblings);
+  } catch (err) {
+    console.error(err);
+    holder.innerHTML = `<div class="error-card small"><p>${err.message}</p></div>`;
+  }
+  return { viewer: null };
 }
 
 async function openPathFallback(rel, mode) {
@@ -174,6 +305,8 @@ export class PdfViewer {
     this.initialPage = initialPage || 1;
     this._syncing = false;
     this.onPaneScroll = null;    // 作业对照同步滚动钩子
+    this.onSplitToggle = null;   // 分屏按钮（full 模式工具栏）
+    this.urlBuilder = null;      // 自定义阅读 hash（分屏模式下携带 split 参数）
   }
 
   /* ---------- chrome ---------- */
@@ -208,6 +341,7 @@ export class PdfViewer {
             <button class="tb-icon-btn r-search-prev" title="上一个命中">${svgIco("i-chev-up")}</button>
             <button class="tb-icon-btn r-search-next" title="下一个命中">${svgIco("i-chev-down")}</button>
           </div>
+          <button class="tb-icon-btn r-split" title="分屏：再开一份资料并排阅读">${svgIco("i-layout-cols")}</button>
           <button class="tb-icon-btn r-outline" title="目录 / 大纲">${svgIco("i-list")}</button>
           <button class="tb-icon-btn r-reveal" title="在资源管理器中显示">${svgIco("i-reveal")}</button>
           <button class="tb-icon-btn r-sysopen" title="使用系统程序打开">${svgIco("i-external")}</button>
@@ -284,6 +418,14 @@ export class PdfViewer {
     return top || "课程资料";
   }
 
+  /* 更新地址栏（保留分屏参数；默认 #/read?path=&page=） */
+  _replaceUrl(page) {
+    const url = this.urlBuilder
+      ? this.urlBuilder(page)
+      : `#/read?path=${encodeURIComponent(this.node.rel)}${page > 1 ? "&page=" + page : ""}`;
+    history.replaceState(null, "", url);
+  }
+
   /* ---------- 加载 ---------- */
   async load() {
     this._buildChrome();
@@ -320,10 +462,7 @@ export class PdfViewer {
       if (!start && prog && prog.page) start = prog.page;
       this.currentPage = Math.min(Math.max(start || 1, 1), this.pdf.numPages);
       setProgress(this.node.rel, { page: this.currentPage, total: this.pdf.numPages });
-      if (this.initialPage !== this.currentPage) {
-        history.replaceState(null, "",
-          `#/read?path=${encodeURIComponent(this.node.rel)}&page=${this.currentPage}`);
-      }
+      this._replaceUrl(this.currentPage);
       // 大文件提示
       if (this.node.sizeBytes > 30 * 1024 * 1024) {
         toast(`文件较大（${fmtSize(this.node.sizeBytes)}），页面按需加载中…`);
@@ -462,8 +601,7 @@ export class PdfViewer {
         this._prefetchNeighbors();
         if (this.mode === "full") {
           setProgress(this.node.rel, { page: this.currentPage, total: this.pdf.numPages });
-          history.replaceState(null, "",
-            `#/read?path=${encodeURIComponent(this.node.rel)}&page=${this.currentPage}`);
+          this._replaceUrl(this.currentPage);
         }
       }, 250);
     }, { passive: true });
@@ -685,6 +823,7 @@ export class PdfViewer {
       q(".r-reveal").addEventListener("click", () => openPathFallback(this.node.rel, "reveal"));
       q(".r-sysopen").addEventListener("click", () => openPathFallback(this.node.rel, "open"));
       q(".r-outline").addEventListener("click", () => this._toggleOutline());
+      q(".r-split").addEventListener("click", () => this.onSplitToggle && this.onSplitToggle());
       this.side.querySelector(".rs-close").addEventListener("click", () => this._toggleOutline(false));
     }
     q(".r-prev").addEventListener("click", () => this._jump(this.currentPage - 1));
@@ -749,8 +888,7 @@ export class PdfViewer {
     this._scrollToPage(n);
     if (this.mode === "full") {
       setProgress(this.node.rel, { page: n, total: this.pdf.numPages });
-      history.replaceState(null, "",
-        `#/read?path=${encodeURIComponent(this.node.rel)}&page=${n}`);
+      this._replaceUrl(n);
     }
   }
 

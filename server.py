@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
 APP_NAME = "course-reader"
-APP_VERSION = "P2.2"
+APP_VERSION = "P2.3"
 
 # ---------------------------------------------------------------------------
 # 路径配置

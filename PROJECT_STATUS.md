@@ -470,4 +470,47 @@
 - 缩放上限 600%、下限 10%，未提供页面旋转与双页视图。
 - 推送通道：本机 `github.com:443` 常被阻断（`git push` 报 `Failed to connect to github.com port 443`），而 `api.github.com` 可达。备用方案是 `python tools/gh_api_push.py "提交信息"` —— 用 git 数据 API 建 blob/tree/commit 并移动 `main`，只上传内容变化的 blob。代价是远端提交 sha 与本地不同（tree 一致），之后 `git push` 恢复可用时需先 `git fetch` 对齐。
 
+## P2.3 —— 分屏阅读（已完成）
+
+### 起因
+
+用户反馈：「我还是无法同时打开多个文件啊，我需要返回之后再打开另一个，这和只能打开一个有什么区别」。P2.2 的多标签解决的是「切换」，用户要的是「同时看」—— 两份资料并排。
+
+### 实现要点
+
+**1. 路由（`js/app.js`）**：`#/read` 新增 `split` / `splitpage` 参数 —— `#/read?path=A&split=B&splitpage=2` 表示主文件 A、右侧分屏 B（恢复到第 2 页）。分屏文件不存在时 toast 提示并忽略，不阻塞主文件。分屏状态在 URL 里，可刷新、可收藏、可复制给另一个标签页。
+
+**2. 渲染（`js/reader.js`）**：
+
+- PDF 主区与分屏各是一个 `PdfViewer`（分屏用 compare 页已在用的 pane 模式），两侧独立滚动 / 翻页 / 缩放，互不同步。
+- 加载顺序：先让主 viewer 带「基础版 urlBuilder」load（保住 load 期间 `_replaceUrl` 的 split 参数），再 mount 分屏，成功后切成「动态版」（splitViewer 的当前页实时写回 URL）。
+- `mountSplitPane()` 是通用函数：分屏文件是 PDF 走 PdfViewer pane，是 Markdown / DOCX / 代码 / 图片走 `createViewerFor`——任意组合（PDF+PDF、MD+PDF、PDF+图片…）都能并排。
+- 分屏面板头部：「对照」标签 + 文件名 + 更换（重开选择器）+ 关闭（退回单栏）。
+- 主工具栏「分屏」按钮激活态高亮；再点一次 = 退出分屏。文档阅读器同样有 `#d-split`。
+
+**3. 标签条与分屏共存**：分屏文件也进标签（`openTab`），但 active 保持主文件 —— `openTab` 会把 active 指到新开的文件，之后必须 `setActive(node.rel)` + `paintTabs()` 拨回（这是首测 20/23 里唯一的真产品 bug）。
+
+**4. 进度落盘**：1.2 s 的 `syncTab` 同时 remember 主文件与分屏文件（页码/缩放进 sessionStorage 标签 + `setProgress` 进 state.json）—— 分屏里翻过的页在「最近阅读」里也有记录；下次通过选择器开同一份文件时自动恢复到上次的页。
+
+**5. 布局（`css/style.css`）**：`.reader-body.has-split` / `.doc-body.has-split` 左右各 50%（`flex: 1 1 50%; max-width: 50%`），中间 1px 分隔线；`@media (max-width: 900px)` 自动改上下排列（`flex-direction: column`，实测 820×1000 下两栏各 ~400px 高、`bodyDirection === "column"`）。几何探针（`tests/probe_split_geo.mjs`，1400×900）：main x0 w700 / pane x700 w700，两纸 x27 w636 与 x726 w637 —— 完全对称。
+
+**6. 顺带**：`_replaceUrl(page)` 抽象成方法（urlBuilder 可注入），默认 URL 里 `page=1` 省略，地址栏更干净。
+
+### 版本
+
+- `server.py` 的 `APP_VERSION` 由 `P2.2` 升至 `P2.3`。
+
+### 验收结果（全部通过）
+
+- `tests/cdp_split.mjs` **23/23**（新增）：分屏按钮存在、进入后 `has-split`、对照标签 + 文件名、左右各有画布、URL 带 split 参数、分屏文件进标签条、按钮激活态、右侧独立翻页（p2）左侧不动（p1）、右侧独立缩放（107%→128%）、左侧翻页后 URL 仍带 split、退出后单栏 + URL 无 split + 分屏文件留标签条、带参直接进入恢复右侧页码、窄窗上下排列、MD+PDF 混排、MD 退出分屏后正文重挂、零 JS 异常。
+- 回归（P2.3 代码上全量重跑）：`cdp_p1` 17/17、`cdp_p2` 14/14、`cdp_p1_final` 6/6、`cdp_exams` 39/39、`cdp_reader` 18/18、`cdp_shell` 5/5、`cdp_adapt` 22/22、`check_crumb` 4/4、`check_refresh` PASS、`cdp_zoom` / `cdp_progress` / `cdp_state` PASS。
+- 截图留档：`tests/shots/after/` 下 `reader_split.png`、`reader_split_dark.png`、`reader_split_narrow.png`、`reader_split_md.png`；`docs/screenshots/` 同步入库 `reader-split(-dark/-narrow).png`。
+
+### 已知限制
+
+- 分屏为两栏（一主一辅）；没有三栏及以上的「平铺」模式。
+- 分屏两侧不做同步滚动（作业对照页 `#/compare` 才有同步滚动，两处用途不同）。
+- 分屏文件不支持「在分屏里再分屏」；要换第二份文件用面板头部的「更换」。
+
+
 

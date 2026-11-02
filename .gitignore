@@ -32,6 +32,7 @@ tests/*
 !tests/cdp_p1_final.mjs
 !tests/cdp_adapt.mjs
 !tests/cdp_reader.mjs
+!tests/cdp_split.mjs
 !tests/check_crumb.mjs
 !tests/check_refresh.mjs
 !tests/unit_exams_core.mjs
@@ -40,6 +41,7 @@ tests/*
 !tests/shot_narrow.mjs
 !tests/shot_dark.mjs
 !tests/shot_reader_tabs.mjs
+!tests/shot_split.mjs
 !tests/make_fixture_adapt.py
 !tests/probe_tree_cache.py
 !tests/probe_exams.py
