@@ -5,7 +5,7 @@ import { createViewerFor } from "./viewers.js";
 import { onPaneScroll } from "./assignment.js";
 import {
   openTab, closeTab, setActive, getTabs, remember,
-  renderTabStrip, scrollActiveIntoView, pickFile, collectReadableFiles,
+  renderTabStrip, scrollActiveIntoView, pickFile,
 } from "./tabs.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
@@ -37,7 +37,7 @@ function splitHash(rel, page, splitRel, splitPage) {
 
 /* 打开资料选择器，选一份文件与当前文件并排（分屏） */
 function pickSplitFile(currentRel, currentPage, onExit) {
-  pickFile(collectReadableFiles(G.tree), f => {
+  pickFile(G.tree, f => {
     if (f.rel === currentRel) { toast("分屏文件与当前文件相同，已取消"); return; }
     const prog = getProgress(f.rel);          // 分屏文件若有历史进度则恢复
     location.hash = splitHash(currentRel, currentPage, f.rel, prog && prog.page ? prog.page : 1);
@@ -309,7 +309,7 @@ function initTabs(tabHost, node, splitCtx) {
         }
       },
       onAdd: () => {
-        pickFile(collectReadableFiles(G.tree), f => {
+        pickFile(G.tree, f => {
           if (splitCtx) {
             if (f.rel === splitCtx.rel) { splitCtx.swap(); return; }         // 已是分屏文件 → 互换
             splitCtx.openAlongside(f.rel);                                   // 保住当前对照

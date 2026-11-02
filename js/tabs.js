@@ -146,8 +146,51 @@ export function closeActivePicker() {
   }
 }
 
-/* files: [{rel, name, course, kind}]；onPick(file) */
-export function pickFile(files, onPick) {
+/* 把资料树整理成选择器用的层级结构：只保留可读文件，目录带递归计数，空分支剪掉 */
+function buildPickerTree(tree) {
+  const walk = node => {
+    const children = [];
+    let count = 0;
+    for (const c of node.children || []) {
+      if (c.type === "dir") {
+        const sub = walk(c);
+        if (sub.count > 0) {
+          children.push({ name: c.name, rel: c.rel, kind: "dir", count: sub.count, children: sub.children });
+          count += sub.count;
+        }
+      } else if (isReadableName(c.name)) {
+        children.push({ name: c.name, rel: c.rel, kind: "file" });
+        count += 1;
+      }
+    }
+    return { children, count };
+  };
+  const root = walk({ children: [...(tree.courses || []), ...(tree.rootFiles || [])] });
+  for (const c of root.children) if (c.kind === "dir") c.kind = "course";
+  return root;
+}
+
+/* 扁平化成 [{rel, name, course}]（搜索列表与回调参数用） */
+function flattenTree(root) {
+  const out = [];
+  const walk = (nodes, course) => {
+    for (const n of nodes) {
+      if (n.kind === "file") out.push({ rel: n.rel, name: n.name, course: course || "" });
+      else walk(n.children, n.kind === "course" ? n.name : course);
+    }
+  };
+  walk(root.children, "");
+  return out;
+}
+
+/* tree: G.tree；onPick(file)，file = {rel, name, course}
+   默认按「课程 → 文件夹 → 文件」树形浏览，目录可展开收起；
+   输入关键词时退回扁平筛选列表（和课程库搜索一致的心智） */
+export function pickFile(tree, onPick) {
+  const root = buildPickerTree(tree);
+  const flat = flattenTree(root);
+  const byRel = new Map(flat.map(f => [f.rel, f]));
+
   const back = document.createElement("div");
   back.className = "modal-back";
   back.innerHTML = `
@@ -161,7 +204,7 @@ export function pickFile(files, onPick) {
         <input type="search" placeholder="按文件名或课程筛选…" aria-label="筛选资料" />
       </div>
       <div class="modal-body picker-body"><div class="picker-list"></div></div>
-      <div class="modal-foot"><span class="picker-hint">↑↓ 选择 · Enter 打开 · Esc 关闭</span></div>
+      <div class="modal-foot"><span class="picker-hint">↑↓ 选择 · Enter 打开/展开 · Esc 关闭</span></div>
     </div>`;
   document.body.appendChild(back);
   /* 渐显：.modal-back 默认 opacity:0，必须补上 .in 才可见
@@ -170,27 +213,70 @@ export function pickFile(files, onPick) {
 
   const input = back.querySelector("input");
   const list = back.querySelector(".picker-list");
-  let rows = [];
-  let cur = 0;
+  const expanded = new Set();       // 展开中的目录 rel
+  let rows = [];                    // 当前可见的可交互行（DOM 顺序）
+  let curIdx = 0;
 
-  const paint = q => {
-    const kw = q.trim().toLowerCase();
-    const hits = files.filter(f => !kw || f.name.toLowerCase().includes(kw) || f.course.toLowerCase().includes(kw) || f.rel.toLowerCase().includes(kw));
-    rows = hits.slice(0, 200);
-    if (!rows.length) {
-      list.innerHTML = `<div class="picker-empty">没有匹配的资料</div>`;
-      return;
+  const renderRows = () => {
+    const kw = input.value.trim().toLowerCase();
+    if (kw) {
+      /* 有关键词：扁平筛选（文件行带课程上下文） */
+      const hits = flat.filter(f =>
+        f.name.toLowerCase().includes(kw) || f.course.toLowerCase().includes(kw) || f.rel.toLowerCase().includes(kw)
+      ).slice(0, 200);
+      if (!hits.length) return `<div class="picker-empty">没有匹配的资料</div>`;
+      return hits.map(f => {
+        const fm = formatFor(f.name);
+        return `<button class="picker-row picker-file" data-kind="file" data-rel="${escapeAttr(f.rel)}">
+          <span class="picker-badge ${fm.badge || ""}">${fm.ext || "—"}</span>
+          <span class="picker-text"><b>${escapeHtml(f.name)}</b><em>${escapeHtml(f.course)}</em></span>
+        </button>`;
+      }).join("");
     }
-    cur = Math.min(cur, rows.length - 1);
-    list.innerHTML = rows.map((f, i) => {
-      const fm = formatFor(f.name);
-      return `<button class="picker-row${i === cur ? " cur" : ""}" data-i="${i}">
-        <span class="picker-badge ${fm.badge || ""}">${fm.ext || "—"}</span>
-        <span class="picker-text"><b>${escapeHtml(f.name)}</b><em>${escapeHtml(f.course)}</em></span>
-      </button>`;
-    }).join("");
-    const curEl = list.querySelector(".picker-row.cur");
-    if (curEl && curEl.scrollIntoView) curEl.scrollIntoView({ block: "nearest" });
+    /* 无关键词：树形浏览 */
+    const renderNode = (n, depth) => {
+      if (n.kind === "file") {
+        const fm = formatFor(n.name);
+        return `<button class="picker-row picker-file" data-kind="file" data-rel="${escapeAttr(n.rel)}" style="--depth:${depth}">
+          <span class="picker-badge ${fm.badge || ""}">${fm.ext || "—"}</span>
+          <span class="picker-text"><b>${escapeHtml(n.name)}</b></span>
+        </button>`;
+      }
+      const open = expanded.has(n.rel);
+      return `<button class="picker-row picker-dir${n.kind === "course" ? " course" : ""}${open ? " open" : ""}" data-kind="dir" data-rel="${escapeAttr(n.rel)}" style="--depth:${depth}" aria-expanded="${open}">
+        <svg class="ico picker-arrow"><use href="#i-chev"/></svg>
+        <svg class="ico picker-ficon"><use href="#${n.kind === "course" ? "i-library" : "i-folder"}"/></svg>
+        <span class="picker-text"><b>${escapeHtml(n.name)}</b></span>
+        <span class="picker-count">${n.count}</span>
+      </button>${open ? n.children.map(c => renderNode(c, depth + 1)).join("") : ""}`;
+    };
+    if (!root.children.length) return `<div class="picker-empty">没有可打开的资料</div>`;
+    return root.children.map(c => renderNode(c, 0)).join("");
+  };
+
+  const syncCur = () => {
+    rows.forEach((r, i) => r.classList.toggle("cur", i === curIdx));
+    const el = rows[curIdx];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  };
+
+  const paint = focusRel => {
+    list.innerHTML = renderRows();
+    rows = [...list.querySelectorAll(".picker-row")];
+    if (!rows.length) { curIdx = 0; return; }
+    if (focusRel) {
+      const i = rows.findIndex(r => r.dataset.rel === focusRel);
+      curIdx = i >= 0 ? i : Math.min(curIdx, rows.length - 1);
+    } else {
+      curIdx = Math.min(curIdx, rows.length - 1);
+    }
+    syncCur();
+  };
+
+  const toggleDir = rel => {
+    if (expanded.has(rel)) expanded.delete(rel);
+    else expanded.add(rel);
+    paint(rel);   // 重画后光标留在原目录行上
   };
 
   const done = () => {
@@ -202,11 +288,14 @@ export function pickFile(files, onPick) {
 
   const onKey = e => {
     if (e.key === "Escape") { e.preventDefault(); done(); return; }
-    if (e.key === "ArrowDown") { e.preventDefault(); cur = Math.min(cur + 1, rows.length - 1); paint(input.value); return; }
-    if (e.key === "ArrowUp") { e.preventDefault(); cur = Math.max(cur - 1, 0); paint(input.value); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); if (rows.length) { curIdx = Math.min(curIdx + 1, rows.length - 1); syncCur(); } return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); curIdx = Math.max(curIdx - 1, 0); syncCur(); return; }
     if (e.key === "Enter") {
       e.preventDefault();
-      const f = rows[cur];
+      const row = rows[curIdx];
+      if (!row) return;
+      if (row.dataset.kind === "dir") { toggleDir(row.dataset.rel); return; }
+      const f = byRel.get(row.dataset.rel);
       if (f) { done(); onPick(f); }
     }
   };
@@ -214,32 +303,17 @@ export function pickFile(files, onPick) {
   list.addEventListener("click", e => {
     const row = e.target.closest(".picker-row");
     if (!row) return;
-    const f = rows[+row.dataset.i];
+    if (row.dataset.kind === "dir") { toggleDir(row.dataset.rel); return; }
+    const f = byRel.get(row.dataset.rel);
     if (f) { done(); onPick(f); }
   });
-  input.addEventListener("input", () => { cur = 0; paint(input.value); });
+  input.addEventListener("input", () => { curIdx = 0; paint(); });
   back.querySelector(".picker-close").addEventListener("click", done);
   back.addEventListener("click", e => { if (e.target === back) done(); });
   document.addEventListener("keydown", onKey, true);
 
   paint("");
   setTimeout(() => input.focus(), 30);
-}
-
-/* ---------- 从树里收集可读文件 ---------- */
-export function collectReadableFiles(tree) {
-  const out = [];
-  const walk = (node, course) => {
-    for (const c of node.children || []) {
-      if (c.type === "dir") walk(c, course || c.name);
-      else if (isReadableName(c.name)) out.push({ rel: c.rel, name: c.name, course: course || "" });
-    }
-  };
-  for (const course of tree.courses || []) walk(course, course.name);
-  for (const f of tree.rootFiles || []) {
-    if (isReadableName(f.name)) out.push({ rel: f.rel, name: f.name, course: "" });
-  }
-  return out;
 }
 
 function escapeHtml(s) {
