@@ -1,0 +1,46 @@
+# ───────────────── 本机调试产物 ─────────────────
+# Chrome 调试用配置目录（每个几十 MB，绝不入库）
+.chrome-profile/
+.chrome-shot-profile/
+.chrome-shots/
+
+# Python
+__pycache__/
+*.pyc
+
+# ───────────────── 私有数据（不入库） ─────────────────
+# 考试计划（个人日程）与资料根目录（本机绝对路径）
+data/exams.json
+data/exams.json.bak
+data/library-root.txt
+
+# ───────────────── 运行/测试产物 ─────────────────
+*.log
+tests/shots/
+
+# ───────────────── tests/ 只纳入正式验收脚本 ─────────────────
+# 其余临时探针（dbg_*、cdp_probe*、一次性检查脚本）留在本机，不入库
+tests/*
+!tests/README.md
+!tests/cdp_p1.mjs
+!tests/cdp_p2.mjs
+!tests/cdp_exams.mjs
+!tests/cdp_shell.mjs
+!tests/cdp_zoom.mjs
+!tests/cdp_progress.mjs
+!tests/cdp_state.mjs
+!tests/cdp_p1_final.mjs
+!tests/cdp_adapt.mjs
+!tests/check_crumb.mjs
+!tests/check_refresh.mjs
+!tests/unit_exams_core.mjs
+!tests/shot_url.mjs
+!tests/shot_pages.mjs
+!tests/shot_narrow.mjs
+!tests/shot_dark.mjs
+!tests/make_fixture_adapt.py
+!tests/probe_tree_cache.py
+!tests/probe_exams.py
+!tests/baseline_manifest.json
+!tests/fixture_adapt/
+!tests/testdata/

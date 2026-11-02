@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#F5F2FA">
+  <title>Atelier Study</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <script>
+    /* 主题早绑定：在样式表生效前把 data-theme 写到 <html>，避免首帧闪色。
+       localStorage "atelier-theme" 是 settings.theme 的镜像（见 js/app.js）。 */
+    (function () {
+      try {
+        var t = localStorage.getItem("atelier-theme") || "auto";
+        var dark = t === "dark" || (t === "auto" &&
+          window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      } catch (e) { /* 隐私模式等场景下静默降级 */ }
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/vendor/prismjs/themes/prism-tomorrow.min.css">
+  <link rel="stylesheet" href="/vendor/prismjs/prism-line-numbers.css">
+</head>
+<body data-route="home">
+  <!-- 图标精灵（线性图标，随 currentColor 着色） -->
+  <svg class="svg-sprite" aria-hidden="true" focusable="false" width="0" height="0">
+    <defs>
+      <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.5L15 12l-5.5 5.5"/></symbol>
+      <symbol id="i-chev-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5L9 12l5.5 5.5"/></symbol>
+      <symbol id="i-chev-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 14.5L12 9l5.5 5.5"/></symbol>
+      <symbol id="i-chev-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5L12 15l5.5-5.5"/></symbol>
+      <symbol id="i-chev-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6.5L15 12l-5.5 5.5"/></symbol>
+      <symbol id="i-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 7.6A2.4 2.4 0 0 1 5.6 5.2h3a2 2 0 0 1 1.55.74l1.05 1.3h7.2a2.4 2.4 0 0 1 2.4 2.4v7.1a2.4 2.4 0 0 1-2.4 2.4H5.6a2.4 2.4 0 0 1-2.4-2.4z"/></symbol>
+      <symbol id="i-page" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 3.6h7.2l4.4 4.4v12.4H6.2z"/><path d="M13.4 3.6v4.4h4.4"/></symbol>
+      <symbol id="i-pdf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 3.6h7.2l4.4 4.4v12.4H6.2z"/><path d="M13.4 3.6v4.4h4.4"/><path d="M8.8 16.6c1.9-.2 4.2-2.5 4.6-4.4.3-1.4-.7-2-1.4-1.2-1 1.1.6 4.2 3.2 5.2"/></symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 3.6h7.2l4.4 4.4v12.4H6.2z"/><path d="M13.4 3.6v4.4h4.4"/><path d="M9 13h6M9 16.2h4.2"/></symbol>
+      <symbol id="i-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 8.4L5.4 12.2l3.8 3.8"/><path d="M14.8 8.4l3.8 3.8-3.8 3.8"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="4.8" width="17.2" height="14.4" rx="2.6"/><circle cx="8.9" cy="10" r="1.5"/><path d="M4.6 17.2l4.6-4.2 3.1 2.6 3-3.1 4.2 4.1"/></symbol>
+      <symbol id="i-zip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="3.6" width="15.6" height="16.8" rx="2.6"/><path d="M10.6 3.6v3.4M13.4 7v3.4M10.6 10.4v3.2"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.6l4.6 4.6L19 6.6"/></symbol>
+      <symbol id="i-scales" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.4v15.2M7.2 19.6h9.6M4 8.6h16"/><path d="M4 8.6l-2.2 5.2h4.4zM20 8.6l-2.2 5.2h4.4z"/></symbol>
+      <symbol id="i-read" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.4C10.4 4.9 8.2 4 5.6 4H3.4v13.2h2.2c2.6 0 4.8.9 6.4 2.4 1.6-1.5 3.8-2.4 6.4-2.4h2.2V4h-2.2c-2.6 0-4.8.9-6.4 2.4z"/><path d="M12 6.4v13.2"/></symbol>
+      <symbol id="i-reveal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 7.6A2.4 2.4 0 0 1 5.6 5.2h3a2 2 0 0 1 1.55.74l1.05 1.3h7.2a2.4 2.4 0 0 1 2.4 2.4v7.1a2.4 2.4 0 0 1-2.4 2.4H5.6a2.4 2.4 0 0 1-2.4-2.4z"/><path d="M12 10.6v4.6M9.9 13.2h4.2"/></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.4 4.4h5.2v5.2"/><path d="M19.6 4.4l-7.4 7.4"/><path d="M18.4 13.6v4.6A1.8 1.8 0 0 1 16.6 20H5.8A1.8 1.8 0 0 1 4 18.2V7.4a1.8 1.8 0 0 1 1.8-1.8h4.6"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6l8.4 4.4-8.4 4.4L3.6 8z"/><path d="M3.6 12.6L12 17l8.4-4.4"/><path d="M3.6 16.8L12 21.2l8.4-4.4"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20.4 4.4v4.6h-4.6"/></symbol>
+      <symbol id="i-library" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5z"/><path d="M8.5 7.5h6"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><path d="M12 7.2V12l3.2 2"/></symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.8" y="3.8" width="7" height="7" rx="1.8"/><rect x="13.2" y="3.8" width="7" height="7" rx="1.8"/><rect x="3.8" y="13.2" width="7" height="7" rx="1.8"/><rect x="13.2" y="13.2" width="7" height="7" rx="1.8"/></symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 20h15"/><path d="M8 20v-6.5M12 20V5.5M16 20v-10"/></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6l2.72 5.5 6.08.88-4.4 4.29 1.04 6.05L12 17.44l-5.44 2.88 1.04-6.05-4.4-4.29 6.08-.88z"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.4" width="18" height="12.2" rx="2.2"/><path d="M9 20.4h6M12 16.6v3.8"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.8v2.2M12 19v2.2M2.8 12h2.2M19 12h2.2M5.5 5.5l1.6 1.6M16.9 16.9l1.6 1.6M18.5 5.5l-1.6 1.6M7.1 16.9l-1.6 1.6"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></symbol>
+      <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6v8"/><path d="M7.6 6.8a7 7 0 1 0 8.8 0"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+      <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 12h13"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-fit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V6.5A2.5 2.5 0 0 1 6.5 4H9M15 4h2.5A2.5 2.5 0 0 1 20 6.5V9M20 15v2.5a2.5 2.5 0 0 1-2.5 2.5H15M9 20H6.5A2.5 2.5 0 0 1 4 17.5V15"/><path d="M8.2 12h7.6"/><path d="M13.4 9.6L15.8 12l-2.4 2.4M10.6 9.6L8.2 12l2.4 2.4"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 6h10.6M9.2 12h10.6M9.2 18h10.6"/><path d="M4.4 6h.01M4.4 12h.01M4.4 18h.01"/></symbol>
+      <symbol id="i-panel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="4.4" width="17.2" height="15.2" rx="2.4"/><path d="M9.6 4.4v15.2"/></symbol>
+      <symbol id="i-layout-cols" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="4.4" width="17.2" height="15.2" rx="2.4"/><path d="M12 4.4v15.2"/></symbol>
+      <symbol id="i-layout-rows" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="4.4" width="17.2" height="15.2" rx="2.4"/><path d="M3.4 12h17.2"/></symbol>
+      <symbol id="i-sync" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 8h12.3"/><path d="M14.2 5.4L16.8 8l-2.6 2.6"/><path d="M19.5 16H7.2"/><path d="M9.8 13.4L7.2 16l2.6 2.6"/></symbol>
+      <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13.2V7.4A2.4 2.4 0 0 1 6.4 5h11.2A2.4 2.4 0 0 1 20 7.4v5.8"/><path d="M4 13.2h4.2l1.5 2.8h4.6l1.5-2.8H20v3.4a2.4 2.4 0 0 1-2.4 2.4H6.4A2.4 2.4 0 0 1 4 16.6z"/></symbol>
+      <symbol id="i-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.6h16l-6.2 7.2v5.4l-3.6 1.8v-7.2z"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.4 5.6l10 6.4-10 6.4z"/></symbol>
+      <symbol id="i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="1"/></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.6" y="5.2" width="16.8" height="15.2" rx="2.6"/><path d="M3.6 10h16.8"/><path d="M8.4 3.4v3.4M15.6 3.4v3.4"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16.2V4.6"/><path d="M7.4 9.2L12 4.6l4.6 4.6"/><path d="M4.4 15.4v2.4a2.4 2.4 0 0 0 2.4 2.4h10.4a2.4 2.4 0 0 0 2.4-2.4v-2.4"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.6v11.6"/><path d="M7.4 11.8L12 16.2l4.6-4.4"/><path d="M4.4 15.4v2.4a2.4 2.4 0 0 0 2.4 2.4h10.4a2.4 2.4 0 0 0 2.4-2.4v-2.4"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 7h14.4"/><path d="M9.4 7V5.4a1.6 1.6 0 0 1 1.6-1.6h2a1.6 1.6 0 0 1 1.6 1.6V7"/><path d="M6.6 7l.9 11.4a2 2 0 0 0 2 1.8h5a2 2 0 0 0 2-1.8L17.4 7"/><path d="M10.4 10.6v6M13.6 10.6v6"/></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 19.4l4.3-1L19.4 8a2.1 2.1 0 0 0 0-3l-.4-.4a2.1 2.1 0 0 0-3 0L5.6 15.1z"/><path d="M14.8 6.4l2.8 2.8"/></symbol>
+      <symbol id="i-award" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5.2"/><path d="M8.6 13.4L7.2 20.6l4.8-2.4 4.8 2.4-1.4-7.2"/></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3.4l1.7 4.5 4.5 1.7-4.5 1.7L11 15.8 9.3 11.3 4.8 9.6l4.5-1.7z"/><path d="M17.8 14.6l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7z"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.2l8.6 15.4H3.4z"/><path d="M12 9.8v4.6"/><path d="M12 17.4h.01"/></symbol>
+    </defs>
+  </svg>
+
+  <div id="shell">
+    <aside id="sidebar">
+      <a href="#/" id="logo" title="回到书架">
+        <span class="logo-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/>
+            <path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5z"/>
+            <path d="M8.5 7.5h6"/>
+          </svg>
+        </span>
+        <span class="logo-text">
+          <span class="logo-name">Atelier Study</span>
+          <span class="logo-sub">个人学术资料工作台</span>
+        </span>
+      </a>
+      <nav class="side-nav" id="side-nav" aria-label="主导航">
+        <a href="#/" data-nav="home"><svg class="ico"><use href="#i-library"/></svg><span class="nv-label">书架</span></a>
+        <a href="#/recent" data-nav="recent"><svg class="ico"><use href="#i-clock"/></svg><span class="nv-label">最近阅读</span></a>
+        <a href="#/courses" data-nav="courses"><svg class="ico"><use href="#i-grid"/></svg><span class="nv-label">全部课程</span></a>
+        <a href="#/progress" data-nav="progress"><svg class="ico"><use href="#i-chart"/></svg><span class="nv-label">学习进度</span></a>
+        <a href="#/starred" data-nav="starred"><svg class="ico"><use href="#i-star"/></svg><span class="nv-label">收藏</span><em class="nav-count" id="nav-fav-count" hidden></em></a>
+        <div class="nav-sep" role="separator"></div>
+        <a href="#/exams" data-nav="exams"><svg class="ico"><use href="#i-calendar"/></svg><span class="nv-label">考试计划</span><em class="nav-count" id="nav-exam-days" hidden></em></a>
+      </nav>
+      <div class="side-foot">
+        <a class="side-index" id="side-index" href="#/search" title="全文索引状态">
+          <span class="si-dot" aria-hidden="true"></span>
+          <span class="si-text">索引状态获取中…</span>
+        </a>
+        <div class="side-set">
+          <div class="theme-seg" id="theme-seg" role="radiogroup" aria-label="主题模式">
+            <button type="button" data-theme-set="auto" title="跟随系统"><svg class="ico"><use href="#i-monitor"/></svg></button>
+            <button type="button" data-theme-set="light" title="浅色模式"><svg class="ico"><use href="#i-sun"/></svg></button>
+            <button type="button" data-theme-set="dark" title="深色模式"><svg class="ico"><use href="#i-moon"/></svg></button>
+          </div>
+          <button type="button" id="btn-shutdown" class="side-shutdown" title="退出阅读器服务">
+            <svg class="ico"><use href="#i-power"/></svg><span class="nv-label">退出服务</span>
+          </button>
+        </div>
+        <div class="side-ver"><span id="app-version">Atelier Study</span><span class="sv-v" id="app-ver-no"></span></div>
+      </div>
+    </aside>
+    <div id="col">
+      <header id="topbar">
+        <button type="button" id="side-toggle" class="tb-icon-btn" title="收起 / 展开侧栏">
+          <svg class="ico"><use href="#i-panel"/></svg>
+        </button>
+        <div id="crumb" class="crumb"></div>
+        <form id="search-form" class="topbar-search" action="#/search" method="get">
+          <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>
+          </svg>
+          <input id="search-input" type="search" placeholder="全文搜索 PDF 文字层" autocomplete="off" spellcheck="false" />
+          <kbd class="search-kbd">/</kbd>
+        </form>
+        <div id="topbar-tools"></div>
+      </header>
+      <main id="main" class="home">
+        <div id="loading" class="loading">正在扫描资料目录…</div>
+      </main>
+    </div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <!-- P1 渲染依赖（全部本地化，断网可用）。marked/katex/prism/mammoth 以普通脚本先加载，
+       ES 模块 js/*.js 通过 window 全局名访问它们。 -->
+  <script src="/vendor/marked/marked.min.js"></script>
+  <script src="/vendor/katex/katex.min.js"></script>
+  <script src="/vendor/katex/auto-render.min.js"></script>
+  <script src="/vendor/prismjs/prism-core.min.js"></script>
+  <script src="/vendor/prismjs/prism-markup.min.js"></script>
+  <script src="/vendor/prismjs/prism-clike.min.js"></script>
+  <script src="/vendor/prismjs/prism-c.min.js"></script>
+  <script src="/vendor/prismjs/prism-cpp.min.js"></script>
+  <script src="/vendor/prismjs/prism-csharp.min.js"></script>
+  <script src="/vendor/prismjs/prism-java.min.js"></script>
+  <script src="/vendor/prismjs/prism-latex.min.js"></script>
+  <script src="/vendor/prismjs/prism-markdown.min.js"></script>
+  <script src="/vendor/prismjs/prism-line-numbers.min.js"></script>
+  <!-- 扩充语言（formats.js 的 lang 字段引用这些） -->
+  <script src="/vendor/prismjs/prism-javascript.min.js"></script>
+  <script src="/vendor/prismjs/prism-typescript.min.js"></script>
+  <script src="/vendor/prismjs/prism-json.min.js"></script>
+  <script src="/vendor/prismjs/prism-python.min.js"></script>
+  <script src="/vendor/prismjs/prism-go.min.js"></script>
+  <script src="/vendor/prismjs/prism-rust.min.js"></script>
+  <script src="/vendor/prismjs/prism-kotlin.min.js"></script>
+  <script src="/vendor/prismjs/prism-swift.min.js"></script>
+  <script src="/vendor/prismjs/prism-ruby.min.js"></script>
+  <script src="/vendor/prismjs/prism-perl.min.js"></script>
+  <script src="/vendor/prismjs/prism-lua.min.js"></script>
+  <script src="/vendor/prismjs/prism-r.min.js"></script>
+  <script src="/vendor/prismjs/prism-bash.min.js"></script>
+  <script src="/vendor/prismjs/prism-batch.min.js"></script>
+  <script src="/vendor/prismjs/prism-powershell.min.js"></script>
+  <script src="/vendor/prismjs/prism-yaml.min.js"></script>
+  <script src="/vendor/prismjs/prism-sql.min.js"></script>
+  <script src="/vendor/prismjs/prism-ini.min.js"></script>
+  <script src="/vendor/prismjs/prism-toml.min.js"></script>
+  <script src="/vendor/prismjs/prism-cmake.min.js"></script>
+  <script src="/vendor/prismjs/prism-docker.min.js"></script>
+  <script src="/vendor/prismjs/prism-makefile.min.js"></script>
+  <script src="/vendor/prismjs/prism-diff.min.js"></script>
+  <script src="/vendor/prismjs/prism-markup-templating.min.js"></script>
+  <script src="/vendor/prismjs/prism-php.min.js"></script>
+  <script src="/vendor/mammoth/mammoth.browser.min.js"></script>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
