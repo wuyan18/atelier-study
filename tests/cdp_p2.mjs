@@ -69,9 +69,11 @@ await nav(`${BASE}/#/search?q=${encodeURIComponent("Cauchy")}`, 3500);
   record("Topbar input sync", info.inputVal === "Cauchy", `input=${info.inputVal}`);
   record("Scanned note", /复变/.test(info.scannedNote || ""), JSON.stringify((info.scannedNote || "").slice(0, 80)));
 
-  /* 同名文件按完整路径区分：两份讲义同名不同路径都要出现且带完整 rel */
+  /* 同名文件按完整路径区分：两份同名讲义不同路径都要出现，且各带完整 rel
+     （课程整理后副本可能从 04-资料 挪到 99-归档，因此只断言「同课程、路径不同」） */
   const rels = await ev(`[...document.querySelectorAll(".search-hit-card")].map(c => c.dataset.rel)`);
-  const hasBoth = rels.some(r => r.startsWith("概统/01-课件/")) && rels.some(r => r.startsWith("概统/04-资料/"));
+  const sameCourse = rels.filter(r => r.startsWith("概统/"));
+  const hasBoth = sameCourse.length >= 2 && new Set(sameCourse).size === sameCourse.length;
   record("Same-name distinct paths", hasBoth, JSON.stringify(rels));
 }
 

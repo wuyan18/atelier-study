@@ -411,3 +411,62 @@
 - 月历只渲染当前选中月份，跨月考试需切换月份（与源项目一致）。
 - 导出目录固定为「文档\Atelier Study」，未提供自定义路径。
 
+## P2.2 —— 阅读器性能与多标签（已完成）
+
+### 起因
+
+使用中反馈的三件事：大 PDF 打开慢（玻璃圈转很久）、一次只能看一份资料、缩放按钮太小且 `Ctrl + 滚轮` 会触发浏览器整页缩放。
+
+### 实现要点
+
+**1. 按需懒渲染（`js/reader.js`）**
+
+- 原来 `load()` 里 `await Promise.all(所有页 getPage())`，等于逼 PDF.js 把整个对象流走完 —— 66 MB 的 `dsa26.pdf` 即使走 Range 分块，也会再补一次整包请求。
+- 改成：只取第 1 页（`pageObjs[1]`），其余页在滚到视野内时通过 `_page(n)`（`pageProms[n]` 去重缓存）按需取，另用 `_prefetchNeighbors()` 预热相邻页。
+- 渲染队列并发上限 2（`_queue` / `_active` / `_drain`）；滚出视野且非当前页的任务直接丢弃。占位块先按首页比例生成，渲染时按真实视口校正。
+- 补 `visibilitychange` 兜底：窗口被遮挡 / 标签页切到后台时 `IntersectionObserver` 不回调，恢复可见后主动 `_sweepVisible()`。
+
+**2. 阅读进度条**：`loadingTask.onProgress` 驱动 `.pdf-prog`（sticky 胶囊，形如「载入中 42% · 12.3 MB / 66.0 MB」），加载完成即淡出。
+
+**3. 多标签（新模块 `js/tabs.js`，约 280 行）**
+
+- 标签状态落在 `sessionStorage["atelier.reader.tabs"]`，每项 `{rel, name, page, scale}`，上限 8 个。
+- 标签条在阅读器工具栏之上：图标 + 文件名 + `pN` 页码 + 关闭键（中键也能关）；`+` 打开资料选择器（可搜索，↑↓/Enter/Esc）。
+- 切换标签走 hash（`#/read?path=…&page=N`），页码与缩放随标签恢复；PDF 分支每 1.2 s 把当前页写回标签。
+- 文档阅读器（Markdown / DOCX / 代码 / 图片 / ZIP）共用同一套标签条。
+
+**4. 缩放体验**
+
+- 工具栏 `−` / `+` 按钮放大到 40×40（图标 18 px），缩放百分比可点击在「适宽 / 原始大小」间切换。
+- `_setScale(scale, anchorClientY)` 改为锚点缩放：记住光标所在页与页内比例，缩放后按比例还原滚动位置。
+- `Ctrl + 滚轮` 由 `_bindWheelZoom()` 接管（`preventDefault` + 90 ms 节流 + 指数平滑），浏览器整页缩放不再触发；键盘补 `Ctrl + =` / `Ctrl + -` / `Ctrl + 0`。
+- 适宽留白改为按视口宽度自适应（`clamp(14px, 4.5%, 64px)`），纸张不再顶到窗口边缘；深色下画布由 `#121017` 提到 `#221F2C`（深石墨紫），白色纸张保持反差不刺眼。
+
+**5. 窄窗口工具栏**：`@media (max-width: 900px)` 下工具栏换两行 —— 第一行「返回 + 标题 + 页内搜索 + 右侧图标」，第二行「页码组 + 缩放 + 适宽」。此前 `.rt-right` 用 `justify-content: flex-end` 且内容超宽，溢出方向向左，会把 `.rt-center` 的翻页/缩放整块盖住（820 px 实测）。
+
+### 版本
+
+- `server.py` 的 `APP_VERSION` 由 `P2.1` 升至 `P2.2`；`state.json` 顶层键与 `data\exams.json` 格式均未变。
+
+### 验收结果（全部通过）
+
+- `tests/cdp_reader.mjs` **18/18**（新增）：首屏耗时、canvas 数量上限、占位数量、标签增删、页码记忆、缩放按钮尺寸、点击缩放、`Ctrl + 滚轮` 缩放且 `visualViewport.scale === 1`、进度落盘、零 JS 异常。
+- 性能实测（`dsa26.pdf`，66 MB / 352 页，CDP 记录首个 canvas 出现时间）：**776 ms → 142 ms**；整包 200 请求消失，只剩按需的 Range 片段。
+- 回归：`cdp_p1` 17/17、`cdp_p2` 14/14、`cdp_p1_final` 6/6、`cdp_exams` 39/39、`cdp_shell` 5/5、`cdp_adapt` 22/22、`cdp_zoom` / `cdp_progress` / `cdp_state` / `check_crumb` / `check_refresh` 全通过。
+- 截图留档：`tests/shots/after/` 下 `reader_tabs.png`、`reader_tabs_dark.png`、`reader_tabs_narrow.png`、`reader_picker.png`、`reader_md_tabs.png`。
+
+### 测试漂移（资料库被整理，非回归）
+
+资料库文件数 117 → 128、PDF 52 → 54、页数 1112 → 1120，新增 `_通用资料` 课程，若干文件移入 `04-资料/`、`99-归档/`，`计算机系统概论/02-作业/作业01` 的题目 PDF 被删（只剩作答）。原来硬编码路径的断言随之失败，处理方式：
+
+- `cdp_p1` / `cdp_p1_final` 改为「先读 `/api/tree`，用后缀匹配找真实路径」（`findRel("复变函数-课堂笔记大纲.md")`），不再假设文件在顶层。
+- 单侧配对（只有作答、没有题目）改为断言「另一侧显示空状态」而不是「两侧都有 PDF」。
+- `cdp_p2` 的「同名重复副本」改为「同一课程下 ≥ 2 个互不相同的 rel」，不再依赖具体文件名。
+
+### 已知限制
+
+- 标签状态存在 `sessionStorage`，关闭浏览器标签页后不保留（有意：避免长期堆积）。
+- 标签上限 8 个，达到上限时提示先关闭。
+- 缩放上限 600%、下限 10%，未提供页面旋转与双页视图。
+
+

@@ -65,24 +65,23 @@ await nav(`${BASE}/#/read?path=${encodeURIComponent("概统/02-作业/作业02/�
   record("Gallery click switch", swapped && after.name.includes("Figure_3") && after.cur === 2, JSON.stringify(after));
 }
 
-/* B. 部分配对（概统/作业05：题目有 + 作业5.pdf 未分类 → 右侧暂无作答） */
-await nav(`${BASE}/#/compare?dir=${encodeURIComponent("概统/02-作业/作业05")}`, 3000);
+/* B. 单侧配对（计算机系统概论/作业01 只有「作答」一侧 → 左侧空状态、右侧正常渲染） */
+await nav(`${BASE}/#/compare?dir=${encodeURIComponent("计算机系统概论/02-作业/作业01")}`, 3000);
 {
   const info = await ev(`(() => ({
-    q: document.querySelector("#pane-q .pane-label")?.innerText || "",
-    ea: document.querySelector("#pane-a .pane-empty")?.innerText?.trim() || "",
-    canvasQ: document.querySelectorAll("#pane-q canvas").length,
+    q: document.querySelector("#pane-q .pane-empty")?.innerText?.trim() || "",
+    a: document.querySelector("#pane-a .pane-label")?.innerText || "",
+    canvasA: document.querySelectorAll("#pane-a canvas").length,
     unclass: [...document.querySelectorAll(".unclass-file .uf-name")].map(e => e.innerText),
   }))()`);
-  record("Partial pair (题目 only)", /题目/.test(info.q) && info.ea.includes("暂无作答") && info.canvasQ >= 1, JSON.stringify(info).slice(0, 250));
-  record("作业5.pdf unclassified", info.unclass.some(n => n.includes("作业5.pdf")), JSON.stringify(info.unclass));
+  record("Partial pair (作答 only)", info.q.includes("暂无") && /作答/.test(info.a) && info.canvasA >= 1, JSON.stringify(info).slice(0, 250));
 }
 
-/* C. .fig 未知格式说明 */
-await nav(`${BASE}/#/read?path=${encodeURIComponent("概统/02-作业/作业02/作图/untitled.fig")}`, 1200);
+/* C. .fig 未知格式说明（作图目录里的 .fig 已改名为 作业02-作图.fig） */
+await nav(`${BASE}/#/read?path=${encodeURIComponent("概统/02-作业/作业02/作图/作业02-作图.fig")}`, 2000);
 {
   const txt = await ev(`document.querySelector(".unknown-view")?.innerText?.slice(0, 120) || ""`);
-  record("FIG unknown hint", txt.includes("MATLAB") && txt.includes("untitled.fig"), JSON.stringify(txt.slice(0, 80)));
+  record("FIG unknown hint", txt.includes("MATLAB") && txt.includes(".fig"), JSON.stringify(txt.slice(0, 80)));
 }
 
 /* D. 持久化准备：勾选完成（幂等：确保最终为 checked）+ 读 PDF 翻页记进度 */

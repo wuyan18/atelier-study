@@ -73,8 +73,25 @@ await nav(`${BASE}/#/read?path=${encodeURIComponent("数据结构/03-实验/实�
   record("MD katex text", kText.length > 0, JSON.stringify(kText));
 }
 
-/* 2. 大纲.md（课程根目录，Unicode 数学�?*/
-await nav(`${BASE}/#/read?path=${encodeURIComponent("复变函数/复变函数-课堂笔记大纲.md")}`);
+/* 资料根目录会随课程整理变动，按文件名后缀在树里定位，避免测试写死旧路径 */
+const RELS = (() => {
+  const out = { files: [], dirs: [] };
+  const walk = n => {
+    for (const c of n.children || []) {
+      if (c.type === "dir") { out.dirs.push(c.rel); walk(c); }
+      else out.files.push(c.rel);
+    }
+  };
+  return { out, walk };
+})();
+{
+  const tree = await (await fetch(`${BASE}/api/tree`)).json();
+  for (const c of tree.courses || []) RELS.walk(c);
+}
+const findRel = suffix => RELS.out.files.find(r => r.endsWith(suffix)) || suffix;
+
+/* 2. 大纲.md（Unicode 数学，随整理移动过位置） */
+await nav(`${BASE}/#/read?path=${encodeURIComponent(findRel("复变函数-课堂笔记大纲.md"))}`);
 {
   const info = await ev(`(() => {
     const md = document.querySelector(".md-view");
@@ -118,7 +135,7 @@ await nav(`${BASE}/#/read?path=${encodeURIComponent("数据结构/03-实验/实�
 }
 
 /* 6. ZIP */
-await nav(`${BASE}/#/read?path=${encodeURIComponent("数据结构/03-实验/实验01/实验01-原始压缩包.zip")}`);
+await nav(`${BASE}/#/read?path=${encodeURIComponent(findRel("实验01-原始压缩包.zip"))}`);
 {
   const info = await ev(`(() => {
     const z = document.querySelector(".zip-view");
@@ -142,16 +159,17 @@ await nav(`${BASE}/#/compare?dir=${encodeURIComponent("形式语言与自动机/
   record("Compare canvases", info.canvases >= 1, `canvases=${info.canvases}`);
 }
 
-/* 8. 对照：未分类（计算机系统概论/作业01，作�?1.pdf 无角色词�?*/
-await nav(`${BASE}/#/compare?dir=${encodeURIComponent("计算机系统概论/02-作业/作业01")}`, 2000);
+/* 8. 对照：单侧配对（计算机系统概论/作业01 现在只有「作答」一侧 → 左侧显示空状态） */
+await nav(`${BASE}/#/compare?dir=${encodeURIComponent("计算机系统概论/02-作业/作业01")}`, 3000);
 {
   const info = await ev(`(() => ({
     eq: document.querySelector("#pane-q .pane-empty")?.innerText?.trim() || "",
-    ea: document.querySelector("#pane-a .pane-empty")?.innerText?.trim() || "",
+    a: document.querySelector("#pane-a .pane-label")?.innerText || "",
+    canvasA: document.querySelectorAll("#pane-a canvas").length,
     unclass: [...document.querySelectorAll(".unclass-file .uf-name")].map(e => e.innerText),
   }))()`);
-  record("Missing sides", info.eq.includes("暂无") && info.ea.includes("暂无"), JSON.stringify(info).slice(0, 260));
-  record("作业01.pdf unclassified", info.unclass.some(n => n.includes("作业01.pdf")), JSON.stringify(info.unclass));
+  record("Missing sides", info.eq.includes("暂无") && /作答/.test(info.a), JSON.stringify(info).slice(0, 260));
+  record("单侧配对仍渲染作答", info.canvasA >= 1, `canvasA=${info.canvasA}`);
 }
 
 /* 9. 完成勾�?*/

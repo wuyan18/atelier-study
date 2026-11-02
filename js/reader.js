@@ -3,6 +3,10 @@ import * as pdfjsLib from "/vendor/pdfjs/pdf.min.mjs";
 import { G, setProgress, getProgress, toast, setTitle, fmtSize, findNode } from "./app.js";
 import { createViewerFor } from "./viewers.js";
 import { onPaneScroll } from "./assignment.js";
+import {
+  openTab, closeTab, setActive, getTabs, remember,
+  renderTabStrip, scrollActiveIntoView, pickFile, collectReadableFiles,
+} from "./tabs.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
 
@@ -27,6 +31,7 @@ export async function renderReader(main, node, initialPage) {
   if (!/\.pdf$/i.test(node.name)) {
     main.className = "doc-page";
     main.innerHTML = `
+      <div class="reader-tabs" id="reader-tabs"></div>
       <div class="doc-toolbar">
         <button class="btn ghost d-back" id="d-back">${svgIco("i-arrow-left")}<span>返回</span></button>
         <span class="t-sep"></span>
@@ -37,6 +42,10 @@ export async function renderReader(main, node, initialPage) {
         <button class="btn ghost d-sysopen" id="d-sysopen">${svgIco("i-external")}<span>系统</span></button>
       </div>
       <div class="doc-body"><div class="doc-loading loading"></div></div>`;
+    openTab(node);
+    setActive(node.rel);
+    const paintTabs = initTabs(main.querySelector("#reader-tabs"), node);
+    paintTabs();
     main.querySelector("#d-back").addEventListener("click", () => history.back());
     main.querySelector("#d-reveal").addEventListener("click", () => openPathFallback(node.rel, "reveal"));
     main.querySelector("#d-sysopen").addEventListener("click", () => openPathFallback(node.rel, "open"));
@@ -61,9 +70,23 @@ export async function renderReader(main, node, initialPage) {
 
   /* --- PDF --- */
   main.className = "reader";
-  main.innerHTML = `<div class="reader-root"><div class="reader-body"><div class="pdf-scroll" id="pdf-scroll"><div class="pdf-pages" id="pdf-pages"></div></div></div></div>`;
+  main.innerHTML = `
+    <div class="reader-root">
+      <div class="reader-tabs" id="reader-tabs"></div>
+      <div class="reader-body"><div class="pdf-scroll" id="pdf-scroll"><div class="pdf-pages" id="pdf-pages"></div></div></div>
+    </div>`;
   const holder = main.querySelector(".reader-root");
+  const tabHost = main.querySelector("#reader-tabs");
+
+  /* 标签页：先登记/激活当前文件，再按标签记录恢复页码与缩放 */
+  const tabRec = openTab(node, initialPage);
+  setActive(node.rel);
   const viewer = new PdfViewer(holder, node, initialPage, "full");
+  viewer.restoreScale = tabRec && tabRec.scale ? tabRec.scale : null;
+
+  const paintTabs = initTabs(tabHost, node);
+  paintTabs();
+
   await viewer.load().catch(err => {
     console.error(err);
     holder.innerHTML = `
@@ -71,12 +94,61 @@ export async function renderReader(main, node, initialPage) {
       <button class="btn primary" id="err-sysopen">${svgIco("i-external")}使用系统程序打开</button></div>`;
     holder.querySelector("#err-sysopen").addEventListener("click", () => openPathFallback(node.rel, "open"));
   });
-  return () => viewer.destroy();
+
+  // 标签上的页码随阅读进度更新
+  const syncTab = () => {
+    if (!viewer || !viewer.pdf) return;
+    remember(node.rel, { page: viewer.currentPage, scale: viewer.scale });
+    const el = tabHost.querySelector(`.rtab[data-rel="${CSS.escape(node.rel)}"] .rtab-page`);
+    if (el) el.textContent = "p" + viewer.currentPage;
+  };
+  const tabTimer = setInterval(syncTab, 1200);
+
+  return () => {
+    clearInterval(tabTimer);
+    syncTab();
+    viewer.destroy();
+  };
 }
 
 async function openPathFallback(rel, mode) {
   const { openPath } = await import("./app.js");
   openPath(rel, mode).catch(err => toast(err.message));
+}
+
+/* 标签条事件（PDF 阅读器与文档阅读器共用） */
+function tabHref(rel) {
+  const t = getTabs().find(x => x.rel === rel);
+  const pg = t && Number(t.page) > 1 ? `&page=${Number(t.page)}` : "";
+  return `#/read?path=${encodeURIComponent(rel)}${pg}`;
+}
+
+function initTabs(tabHost, node) {
+  const paintTabs = () => {
+    renderTabStrip(tabHost, {
+      onSelect: rel => {
+        if (rel === node.rel) return;
+        location.hash = tabHref(rel);
+      },
+      onClose: rel => {
+        const next = closeTab(rel);
+        if (rel !== node.rel) { paintTabs(); return; }
+        if (next) {
+          location.hash = tabHref(next);
+        } else {
+          const top = node.rel.includes("/") ? node.rel.split("/")[0] : "";
+          location.hash = top ? `#/course/${encodeURIComponent(top)}` : "#/";
+        }
+      },
+      onAdd: () => {
+        pickFile(collectReadableFiles(G.tree), f => {
+          location.hash = `#/read?path=${encodeURIComponent(f.rel)}`;
+        });
+      },
+    });
+    scrollActiveIntoView(tabHost);
+  };
+  return paintTabs;
 }
 
 /* ================================================================
@@ -123,10 +195,10 @@ export class PdfViewer {
           <span class="t-info"><span class="r-total" id="r-total">/ —</span></span>
           <button class="tb-icon-btn r-next" id="r-next" title="下一页（→）">${svgIco("i-chev-right")}</button>
           <span class="t-sep"></span>
-          <button class="tb-icon-btn r-zoom-out" id="r-zoom-out" title="缩小（Ctrl-）">${svgIco("i-minus")}</button>
+          <button class="tb-icon-btn r-zoom-out lg" id="r-zoom-out" title="缩小（Ctrl + 滚轮 / Ctrl -）">${svgIco("i-minus")}</button>
           <span class="t-info r-zoom-label" id="r-zoom-label">100%</span>
-          <button class="tb-icon-btn r-zoom-in" id="r-zoom-in" title="放大（Ctrl+）">${svgIco("i-plus")}</button>
-          <button class="btn ghost small r-fit" title="适应宽度">${svgIco("i-fit")}<span>适宽</span></button>
+          <button class="tb-icon-btn r-zoom-in lg" id="r-zoom-in" title="放大（Ctrl + 滚轮 / Ctrl +）">${svgIco("i-plus")}</button>
+          <button class="btn ghost small r-fit" title="适应宽度（Ctrl 0）">${svgIco("i-fit")}<span>适宽</span></button>
         </div>
         <div class="rt-zone rt-right">
           <div class="reader-searchbar" role="search">
@@ -142,7 +214,19 @@ export class PdfViewer {
         </div>`;
 
       this.body = this.root.querySelector(".reader-body");
-      this.root.prepend(this.chrome); // .reader-root 是纵向 flex：工具栏在上，body 在下
+      const tabHost = this.root.querySelector(".reader-tabs");
+      if (tabHost) tabHost.after(this.chrome);   // 标签条在上，工具栏紧随其后
+      else this.root.prepend(this.chrome);
+
+      /* 载入进度条（贴在阅读区顶部，仅在加载中显示） */
+      const scroller = this.root.querySelector(".pdf-scroll");
+      if (scroller) {
+        const prog = document.createElement("div");
+        prog.className = "pdf-prog";
+        prog.hidden = true;
+        prog.innerHTML = `<span class="pdf-prog-text">载入中…</span><span class="pdf-prog-bar"><i></i></span>`;
+        scroller.appendChild(prog);
+      }
 
       /* 大纲侧栏（可折叠，为缩略图/书签预留） */
       this.side = document.createElement("aside");
@@ -207,20 +291,27 @@ export class PdfViewer {
       url: `/api/file?path=${encodeURIComponent(this.node.rel)}`,
       ...PDFJS_OPTS,
     });
-    this.pdf = await loadingTask.promise;
+    this._watchProgress(loadingTask);
 
-    // 预取所有页面对象（轻量，不渲染）
+    this.pdf = await loadingTask.promise;
+    this._loadDone();
+
+    /* 只取第一页的页对象：其余页在真正要渲染时再取。
+       以前在这里 Promise.all 取全部页，等于逼 PDF.js 把整本文件（最大 66 MB）
+       走一遍对象流；现在按需读取，首屏只碰第一页附近的字节。 */
     this.pageObjs = new Array(this.pdf.numPages + 1);
-    const jobs = [];
-    for (let i = 1; i <= this.pdf.numPages; i++) {
-      jobs.push(this.pdf.getPage(i).then(p => { this.pageObjs[i] = p; }));
-    }
-    await Promise.all(jobs);
+    this.pageProms = new Array(this.pdf.numPages + 1);
+    this.pageObjs[1] = await this.pdf.getPage(1);
 
     this.baseViewport = this.pageObjs[1].getViewport({ scale: 1 });
     this.fitScale = this._computeFit();
-    this.scale = this.fitScale;
-    this.atFit = true;
+    if (this.restoreScale && this.restoreScale > 0.1) {
+      this.scale = Math.min(Math.max(this.restoreScale, 0.1), 6);
+      this.atFit = Math.abs(this.scale - this.fitScale) < 0.01;
+    } else {
+      this.scale = this.fitScale;
+      this.atFit = true;
+    }
 
     if (this.mode === "full") {
       // 恢复阅读进度
@@ -247,10 +338,62 @@ export class PdfViewer {
     if (this.mode === "full") this._bindKeys();
     this._scrollToPage(this.currentPage, "instant");
     this._updateZoomLabel();
+
+    /* 不把首屏交给 IntersectionObserver：可见性被系统判定为遮挡时它不会触发，
+       页面就会一直停在占位符上。这里显式画当前页，并顺手预热相邻页。 */
+    this._renderPage(this.currentPage);
+    this._prefetchNeighbors();
+  }
+
+  /* 页对象按需获取（同一页只请求一次） */
+  _page(n) {
+    if (this.pageObjs[n]) return Promise.resolve(this.pageObjs[n]);
+    if (!this.pageProms[n]) {
+      this.pageProms[n] = this.pdf.getPage(n).then(p => { this.pageObjs[n] = p; return p; });
+      this.pageProms[n].catch(() => { this.pageProms[n] = null; });
+    }
+    return this.pageProms[n];
+  }
+
+  _prefetchNeighbors() {
+    for (const n of [this.currentPage - 1, this.currentPage + 1]) {
+      if (n >= 1 && n <= this.pdf.numPages) this._page(n).catch(() => {});
+    }
+  }
+
+  /* ---------- 加载进度 ---------- */
+  _watchProgress(loadingTask) {
+    const box = this._els.scroll && this._els.scroll.querySelector(".pdf-prog");
+    if (!box) return;
+    box.hidden = false;
+    const bar = box.querySelector("i");
+    const txt = box.querySelector(".pdf-prog-text");
+    loadingTask.onProgress = ({ loaded, total }) => {
+      const pct = total ? Math.min(99, Math.round((loaded / total) * 100)) : null;
+      if (bar) bar.style.width = (pct === null ? 35 : pct) + "%";
+      if (txt) {
+        txt.textContent = total
+          ? `载入中 ${pct}% · ${fmtSize(loaded)} / ${fmtSize(total)}`
+          : `载入中 · ${fmtSize(loaded)}`;
+      }
+    };
+  }
+
+  _loadDone() {
+    const box = this._els.scroll && this._els.scroll.querySelector(".pdf-prog");
+    if (box) {
+      const bar = box.querySelector("i");
+      if (bar) bar.style.width = "100%";
+      clearTimeout(this._progTimer);
+      this._progTimer = setTimeout(() => { box.hidden = true; }, 260);
+    }
   }
 
   _computeFit() {
-    const w = this._els.scroll.clientWidth - 36;
+    const cw = this._els.scroll.clientWidth;
+    // 两侧留白：屏幕上给纸张一点呼吸空间，避免页面顶到边缘
+    const side = Math.max(14, Math.min(64, Math.round(cw * 0.045)));
+    const w = cw - side * 2;
     return w > 100 ? w / this.baseViewport.width : 1;
   }
 
@@ -263,7 +406,8 @@ export class PdfViewer {
 
     const frag = document.createDocumentFragment();
     for (let i = 1; i <= this.pdf.numPages; i++) {
-      const vp = this.pageObjs[i].getViewport({ scale: 1 });
+      // 已取到的页对象用真实尺寸，未取到的先用第一页比例占位（渲染时再校正）
+      const vp = this.pageObjs[i] ? this.pageObjs[i].getViewport({ scale: 1 }) : this.baseViewport;
       const wrap = document.createElement("div");
       wrap.className = "pdf-page placeholder";
       wrap.dataset.page = i;
@@ -277,20 +421,35 @@ export class PdfViewer {
 
   /* ---------- 懒渲染观察 ---------- */
   _observe() {
+    this._visible = new Set();
+    this._queue = [];
+    this._active = 0;
+
     this.io = new IntersectionObserver(entries => {
       for (const en of entries) {
         const n = +en.target.dataset.page;
         if (en.isIntersecting) {
           clearTimeout(this.destroyTimers.get(n));
           this.destroyTimers.delete(n);
-          this._renderPage(n);
-        } else if (this.rendered.has(n)) {
-          const t = setTimeout(() => this._destroyPage(n), 4000);
-          this.destroyTimers.set(n, t);
+          this._visible.add(n);
+          this._enqueue(n);
+        } else {
+          this._visible.delete(n);
+          if (this.rendered.has(n)) {
+            const t = setTimeout(() => this._destroyPage(n), 4000);
+            this.destroyTimers.set(n, t);
+          }
         }
       }
     }, { root: this._els.scroll, rootMargin: "120% 0px" });
     this._els.pages.querySelectorAll(".pdf-page").forEach(w => this.io.observe(w));
+
+    // 遮挡/后台标签页会让 IO 不再回调：回到前台时补一次渲染
+    this._visHandler = () => {
+      if (document.visibilityState !== "visible") return;
+      this._sweepVisible();
+    };
+    document.addEventListener("visibilitychange", this._visHandler);
 
     // 滚动 → 当前页同步
     this._els.scroll.addEventListener("scroll", () => {
@@ -300,6 +459,7 @@ export class PdfViewer {
       this._scrollTimer = setTimeout(() => {
         this.currentPage = this._currentPageFromScroll();
         this._els.page.value = this.currentPage;
+        this._prefetchNeighbors();
         if (this.mode === "full") {
           setProgress(this.node.rel, { page: this.currentPage, total: this.pdf.numPages });
           history.replaceState(null, "",
@@ -309,19 +469,57 @@ export class PdfViewer {
     }, { passive: true });
   }
 
+  /* 排队渲染：同时最多 2 页，滚走的页直接丢弃，避免快速滚动时堆一堆任务 */
+  _enqueue(n) {
+    if (this.dead || this.rendered.has(n) || this.building.has(n)) return;
+    if (this._queue.includes(n)) return;
+    this._queue.push(n);
+    this._drain();
+  }
+
+  _drain() {
+    if (this._draining) return;
+    this._draining = true;
+    while (this._active < 2 && this._queue.length) {
+      const n = this._queue.shift();
+      if (!this._visible.has(n) && n !== this.currentPage) continue;
+      this._active++;
+      this._renderPage(n).finally(() => {
+        this._active--;
+        this._draining = false;
+        this._drain();
+      });
+    }
+    this._draining = false;
+  }
+
+  _sweepVisible() {
+    const sc = this._els.scroll;
+    const top = sc.scrollTop, bottom = top + sc.clientHeight;
+    this._els.pages.querySelectorAll(".pdf-page").forEach(w => {
+      const t = w.offsetTop, b = t + w.offsetHeight;
+      if (b > top && t < bottom && !this.rendered.has(+w.dataset.page)) {
+        this._visible.add(+w.dataset.page);
+        this._enqueue(+w.dataset.page);
+      }
+    });
+  }
+
   /* ---------- 页面渲染 ---------- */
   async _renderPage(n) {
     if (this.dead || this.rendered.has(n) || this.building.has(n)) return;
     this.building.add(n);
     try {
-      const pageObj = this.pageObjs[n];
+      const pageObj = await this._page(n);
+      if (this.dead) return;
       const vp = pageObj.getViewport({ scale: this.scale });
       const wrap = this._els.pages.querySelector(`.pdf-page[data-page="${n}"]`);
       if (!wrap || this.dead) return;
 
-      // resize wrapper to current scale
-      wrap.style.width = Math.round(vp.width) + "px";
-      wrap.style.height = Math.round(vp.height) + "px";
+      // 校正占位尺寸（不同页尺寸可能不同）
+      const w = Math.round(vp.width), h = Math.round(vp.height);
+      if (Math.abs(wrap.offsetWidth - w) > 1) wrap.style.width = w + "px";
+      if (Math.abs(wrap.offsetHeight - h) > 1) wrap.style.height = h + "px";
 
       const canvas = document.createElement("canvas");
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -382,21 +580,72 @@ export class PdfViewer {
   }
 
   /* ---------- 缩放 ---------- */
-  _setScale(s) {
+  _pageTopOf(w) {
+    return w.offsetTop - this._els.scroll.offsetTop;
+  }
+
+  _pageAtOffset(docY) {
+    let best = null;
+    this._els.pages.querySelectorAll(".pdf-page").forEach(w => {
+      const t = this._pageTopOf(w);
+      if (docY >= t && docY < t + w.offsetHeight) best = w;
+    });
+    return best;
+  }
+
+  /* anchorClientY：以鼠标位置为锚点缩放（不传则以视口中心为准） */
+  _setScale(s, anchorClientY) {
     s = Math.min(Math.max(s, 0.1), 6);
     if (Math.abs(s - this.scale) < 0.001) return;
+    const sc = this._els.scroll;
+    const rect = sc.getBoundingClientRect();
+    const localY = typeof anchorClientY === "number" ? anchorClientY - rect.top : sc.clientHeight / 2;
+    const docY = sc.scrollTop + localY;
+    const wrap = this._pageAtOffset(docY);
+    const pageNo = wrap ? +wrap.dataset.page : this.currentPage;
+    const ratio = wrap && wrap.offsetHeight ? (docY - this._pageTopOf(wrap)) / wrap.offsetHeight : 0;
+
     this.scale = s;
     this.atFit = false;
     this._rerenderAll();
+
+    const nw = this._els.pages.querySelector(`.pdf-page[data-page="${pageNo}"]`);
+    if (nw) {
+      sc.scrollTop = Math.max(0, this._pageTopOf(nw) + ratio * nw.offsetHeight - localY);
+      this.currentPage = pageNo;
+      this._els.page.value = pageNo;
+    }
+  }
+
+  /* Ctrl/⌘ + 滚轮 = 缩放文档本身（而不是整个网页） */
+  _bindWheelZoom() {
+    const sc = this._els.scroll;
+    let pending = null;
+    this._wheelHandler = e => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();           // 阻止浏览器整页缩放
+      const dy = e.deltaY || 0;
+      if (!dy) return;
+      const factor = Math.exp(-dy * 0.0022);   // 平滑：向上放大，向下缩小
+      pending = { y: e.clientY };
+      clearTimeout(this._wheelTimer);
+      this._wheelTimer = setTimeout(() => {
+        const target = pending;
+        pending = null;
+        if (target) this._setScale(this.scale * factor, target.y);
+      }, 90);
+    };
+    sc.addEventListener("wheel", this._wheelHandler, { passive: false });
   }
 
   _rerenderAll() {
     const cur = this.currentPage;
     for (const [n] of this.rendered) this._destroyPage(n);
     this._els.pages.querySelectorAll(".pdf-page").forEach(w => {
-      const vp = this.pageObjs[+w.dataset.page].getViewport({ scale: this.scale });
-      w.style.width = Math.round(vp.width) + "px";
-      w.style.height = Math.round(vp.height) + "px";
+      const n = +w.dataset.page;
+      const vp = this.pageObjs[n] ? this.pageObjs[n].getViewport({ scale: this.scale }) : this.baseViewport;
+      w.style.width = Math.round(vp.width * (this.pageObjs[n] ? 1 : this.scale)) + "px";
+      w.style.height = Math.round(vp.height * (this.pageObjs[n] ? 1 : this.scale)) + "px";
     });
     this._scrollToPage(cur, "instant");
     // IO 只在交叉状态变化时触发；销毁后必须显式重渲染当前页
@@ -443,14 +692,25 @@ export class PdfViewer {
     this._els.page.addEventListener("keydown", e => {
       if (e.key === "Enter") { this._jump(+this._els.page.value || 1); this._els.page.blur(); }
     });
-    q(".r-zoom-out").addEventListener("click", () => this._setScale(this.scale / 1.15));
-    q(".r-zoom-in").addEventListener("click", () => this._setScale(this.scale * 1.15));
+    q(".r-zoom-out").addEventListener("click", () => this._setScale(this.scale / 1.2));
+    q(".r-zoom-in").addEventListener("click", () => this._setScale(this.scale * 1.2));
+    this._els.zoomLabel.addEventListener("click", () => {
+      // 点百分比：在「适宽」和「100%」之间切换
+      const target = this.atFit ? 1 : this._computeFit();
+      this.fitScale = this._computeFit();
+      this.scale = target;
+      this.atFit = Math.abs(target - this.fitScale) < 0.001;
+      this._rerenderAll();
+    });
+    this._els.zoomLabel.style.cursor = "pointer";
+    this._els.zoomLabel.title = "点击在「适宽 / 原始大小」之间切换";
     q(".r-fit").addEventListener("click", () => {
       this.fitScale = this._computeFit();
       this.scale = this.fitScale;
       this.atFit = true;
       this._rerenderAll();
     });
+    this._bindWheelZoom();
 
     // 页内搜索
     if (this._els.search) {
@@ -500,7 +760,18 @@ export class PdfViewer {
       const t = e.target;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (e.altKey && e.key === "ArrowLeft") { history.back(); return; }
-      if (e.ctrlKey || e.metaKey) return;
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "=" || e.key === "+") { this._setScale(this.scale * 1.2); e.preventDefault(); }
+        else if (e.key === "-") { this._setScale(this.scale / 1.2); e.preventDefault(); }
+        else if (e.key === "0") {
+          this.fitScale = this._computeFit();
+          this.scale = this.fitScale;
+          this.atFit = true;
+          this._rerenderAll();
+          e.preventDefault();
+        }
+        return;
+      }
       if (e.key === "ArrowLeft") { this._jump(this.currentPage - 1); e.preventDefault(); }
       else if (e.key === "ArrowRight") { this._jump(this.currentPage + 1); e.preventDefault(); }
     };
@@ -636,8 +907,14 @@ export class PdfViewer {
     this.dead = true;
     clearTimeout(this._scrollTimer);
     clearTimeout(this._resizeTimer);
+    clearTimeout(this._wheelTimer);
+    clearTimeout(this._progTimer);
     if (this._keyHandler) window.removeEventListener("keydown", this._keyHandler);
     if (this._resizeHandler) window.removeEventListener("resize", this._resizeHandler);
+    if (this._visHandler) document.removeEventListener("visibilitychange", this._visHandler);
+    if (this._wheelHandler && this._els && this._els.scroll) {
+      this._els.scroll.removeEventListener("wheel", this._wheelHandler);
+    }
     for (const t of this.destroyTimers.values()) clearTimeout(t);
     this.destroyTimers.clear();
     if (this.io) this.io.disconnect();
