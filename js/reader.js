@@ -69,7 +69,20 @@ export async function renderReader(main, node, initialPage, opts = {}) {
       </div>`;
     openTab(node);
     setActive(node.rel);
-    const paintTabs = initTabs(main.querySelector("#reader-tabs"), node);
+    /* 分屏上下文（文档没有页码 API，页码取标签记录） */
+    const splitCtx = opts.splitNode ? {
+      rel: opts.splitNode.rel,
+      swap: () => {
+        const pages = Object.fromEntries(getTabs().map(t => [t.rel, t.page || 1]));
+        location.hash = splitHash(opts.splitNode.rel, pages[opts.splitNode.rel] || 1, node.rel, pages[node.rel] || 1);
+      },
+      exit: () => { location.hash = splitHash(node.rel, 0, null, 0); },
+      openAlongside: rel => {
+        const pages = Object.fromEntries(getTabs().map(t => [t.rel, t.page || 1]));
+        location.hash = splitHash(rel, 1, opts.splitNode.rel, pages[opts.splitNode.rel] || 1);
+      },
+    } : null;
+    const paintTabs = initTabs(main.querySelector("#reader-tabs"), node, splitCtx);
     paintTabs();
     main.querySelector("#d-back").addEventListener("click", () => history.back());
     main.querySelector("#d-reveal").addEventListener("click", () => openPathFallback(node.rel, "reveal"));
@@ -109,14 +122,16 @@ export async function renderReader(main, node, initialPage, opts = {}) {
       splitViewer = rec && rec.viewer ? rec.viewer : null;
     }
     const tabHost2 = main.querySelector("#reader-tabs");
+    /* 分屏文件的标签页码/缩放随其阅读进度更新（仅 PDF 分屏有页码概念）
+       旧实现把 syncTab 挂在 viewer 属性上，但没有任何地方调用它 —— 死代码 */
     const syncSplitTab = () => {
       if (!splitViewer || !splitViewer.pdf) return;
       remember(opts.splitNode.rel, { page: splitViewer.currentPage, scale: splitViewer.scale });
       const el = tabHost2 && tabHost2.querySelector(`.rtab[data-rel="${CSS.escape(opts.splitNode.rel)}"] .rtab-page`);
       if (el) el.textContent = "p" + splitViewer.currentPage;
     };
-    if (splitViewer) { splitViewer.syncTab = syncSplitTab; syncSplitTab(); }
-    return () => { if (splitViewer) splitViewer.destroy(); };
+    const splitTimer = setInterval(syncSplitTab, 1200);
+    return () => { clearInterval(splitTimer); if (splitViewer) splitViewer.destroy(); };
   }
 
   /* --- PDF --- */
@@ -138,7 +153,20 @@ export async function renderReader(main, node, initialPage, opts = {}) {
   const viewer = new PdfViewer(holder, node, initialPage, "full");
   viewer.restoreScale = tabRec && tabRec.scale ? tabRec.scale : null;
 
-  const paintTabs = initTabs(tabHost, node);
+  /* 分屏上下文：分屏文件标签的点击/关闭/加号语义（闭包在用户操作时才取 splitViewer） */
+  const splitCtx = opts.splitNode ? {
+    rel: opts.splitNode.rel,
+    swap: () => {            // 点击分屏文件标签：主↔分屏互换，各自页码保留
+      const sp = splitViewer && splitViewer.pdf ? splitViewer.currentPage : (opts.splitPage || 1);
+      location.hash = splitHash(opts.splitNode.rel, sp, node.rel, viewer.currentPage);
+    },
+    exit: () => { location.hash = splitHash(node.rel, viewer.currentPage, null, 0); },
+    openAlongside: rel => {  // “+” 打开新资料时保住当前对照
+      const sp = splitViewer && splitViewer.pdf ? splitViewer.currentPage : (opts.splitPage || 1);
+      location.hash = splitHash(rel, 1, opts.splitNode.rel, sp);
+    },
+  } : null;
+  const paintTabs = initTabs(tabHost, node, splitCtx);
   paintTabs();
 
   /* 分屏：主工具栏按钮 */
@@ -247,21 +275,30 @@ async function openPathFallback(rel, mode) {
   openPath(rel, mode).catch(err => toast(err.message));
 }
 
-/* 标签条事件（PDF 阅读器与文档阅读器共用） */
+/* 标签条事件（PDF 阅读器与文档阅读器共用）
+   splitCtx：处于分屏时为 { rel, swap(), exit(), openAlongside(rel) }，
+   定义「分屏文件的标签」在该状态下的语义。 */
 function tabHref(rel) {
   const t = getTabs().find(x => x.rel === rel);
   const pg = t && Number(t.page) > 1 ? `&page=${Number(t.page)}` : "";
   return `#/read?path=${encodeURIComponent(rel)}${pg}`;
 }
 
-function initTabs(tabHost, node) {
+function initTabs(tabHost, node, splitCtx) {
   const paintTabs = () => {
     renderTabStrip(tabHost, {
       onSelect: rel => {
         if (rel === node.rel) return;
+        if (splitCtx && rel === splitCtx.rel) { splitCtx.swap(); return; }   // 分屏文件标签：主↔分屏互换
         location.hash = tabHref(rel);
       },
       onClose: rel => {
+        if (splitCtx && rel === splitCtx.rel) {
+          // 关掉分屏文件的标签 = 收起分屏（面板里正是这份文件）
+          closeTab(rel);
+          splitCtx.exit();
+          return;
+        }
         const next = closeTab(rel);
         if (rel !== node.rel) { paintTabs(); return; }
         if (next) {
@@ -273,6 +310,11 @@ function initTabs(tabHost, node) {
       },
       onAdd: () => {
         pickFile(collectReadableFiles(G.tree), f => {
+          if (splitCtx) {
+            if (f.rel === splitCtx.rel) { splitCtx.swap(); return; }         // 已是分屏文件 → 互换
+            splitCtx.openAlongside(f.rel);                                   // 保住当前对照
+            return;
+          }
           location.hash = `#/read?path=${encodeURIComponent(f.rel)}`;
         });
       },
@@ -731,17 +773,28 @@ export class PdfViewer {
     return best;
   }
 
-  /* anchorClientY：以鼠标位置为锚点缩放（不传则以视口中心为准） */
-  _setScale(s, anchorClientY) {
+  /* anchorClientX/Y：以鼠标位置为锚点缩放（不传则以视口中心为准）；两轴都保真 */
+  _setScale(s, anchorClientX, anchorClientY) {
     s = Math.min(Math.max(s, 0.1), 6);
     if (Math.abs(s - this.scale) < 0.001) return;
     const sc = this._els.scroll;
     const rect = sc.getBoundingClientRect();
+    const localX = typeof anchorClientX === "number" ? anchorClientX - rect.left : sc.clientWidth / 2;
     const localY = typeof anchorClientY === "number" ? anchorClientY - rect.top : sc.clientHeight / 2;
     const docY = sc.scrollTop + localY;
-    const wrap = this._pageAtOffset(docY);
+    const docX = sc.scrollLeft + localX;
+
+    /* 锚点所在的页，以及锚点在页内的相对位置（0~1） */
+    const wrap = this._pageAtOffset(docY)
+      || this._els.pages.querySelector(`.pdf-page[data-page="${this.currentPage}"]`);
     const pageNo = wrap ? +wrap.dataset.page : this.currentPage;
-    const ratio = wrap && wrap.offsetHeight ? (docY - this._pageTopOf(wrap)) / wrap.offsetHeight : 0;
+    let relY = 0.5, relX = 0.5;
+    if (wrap) {
+      const y = wrap.offsetHeight ? (docY - this._pageTopOf(wrap)) / wrap.offsetHeight : 0.5;
+      const x = wrap.offsetWidth ? (docX - (wrap.offsetLeft - sc.offsetLeft)) / wrap.offsetWidth : 0.5;
+      relY = Math.min(Math.max(y, 0), 1);
+      relX = Math.min(Math.max(x, 0), 1);
+    }
 
     this.scale = s;
     this.atFit = false;
@@ -749,29 +802,44 @@ export class PdfViewer {
 
     const nw = this._els.pages.querySelector(`.pdf-page[data-page="${pageNo}"]`);
     if (nw) {
-      sc.scrollTop = Math.max(0, this._pageTopOf(nw) + ratio * nw.offsetHeight - localY);
+      sc.scrollTop = Math.max(0, this._pageTopOf(nw) + relY * nw.offsetHeight - localY);
+      sc.scrollLeft = Math.max(0, nw.offsetLeft - sc.offsetLeft + relX * nw.offsetWidth - localX);
       this.currentPage = pageNo;
       this._els.page.value = pageNo;
     }
   }
 
-  /* Ctrl/⌘ + 滚轮 = 缩放文档本身（而不是整个网页） */
+  /* Ctrl/⌘ + 滚轮 = 缩放文档本身（而不是整个网页）
+     第一格立即生效；连续滚动时因子持续累加，按节流窗口统一应用：
+     既不丢格（旧实现只取最后一格），也不会每帧全量重渲染。 */
   _bindWheelZoom() {
     const sc = this._els.scroll;
-    let pending = null;
+    const APPLY_MS = 120;
+    let acc = 1;                 // 待应用的累积因子
+    let anchorX = null, anchorY = null;
+    let last = 0;                // 上次实际应用的时间戳
     this._wheelHandler = e => {
       if (!e.ctrlKey && !e.metaKey) return;
-      e.preventDefault();           // 阻止浏览器整页缩放
+      e.preventDefault();        // 阻止浏览器整页缩放
       const dy = e.deltaY || 0;
       if (!dy) return;
-      const factor = Math.exp(-dy * 0.0022);   // 平滑：向上放大，向下缩小
-      pending = { y: e.clientY };
-      clearTimeout(this._wheelTimer);
-      this._wheelTimer = setTimeout(() => {
-        const target = pending;
-        pending = null;
-        if (target) this._setScale(this.scale * factor, target.y);
-      }, 90);
+      acc *= Math.exp(-dy * 0.0022);   // 平滑：向上放大，向下缩小
+      anchorX = e.clientX; anchorY = e.clientY;
+      const now = performance.now();
+      if (now - last >= APPLY_MS) {
+        // 距上次应用已超过节流窗：立即应用（保证第一格就有反馈）
+        last = now;
+        const f = acc; acc = 1;
+        this._setScale(this.scale * f, anchorX, anchorY);
+      } else {
+        // 节流窗内：累积，到窗口边界统一应用
+        clearTimeout(this._wheelTimer);
+        this._wheelTimer = setTimeout(() => {
+          last = performance.now();
+          const f = acc; acc = 1;
+          if (f !== 1) this._setScale(this.scale * f, anchorX, anchorY);
+        }, APPLY_MS - (now - last));
+      }
     };
     sc.addEventListener("wheel", this._wheelHandler, { passive: false });
   }

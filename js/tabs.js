@@ -50,7 +50,11 @@ export function openTab(node, page) {
   if (!tab) {
     tab = { rel, name: node.name || rel.split("/").pop(), page: page || 1, scale: null };
     tabs.push(tab);
-    if (tabs.length > MAX) tabs = tabs.slice(tabs.length - MAX);
+    if (tabs.length > MAX) {
+      /* 满员时驱逐最旧的「非当前」标签：主/分屏文件正挂在屏幕上，不能被挤掉 */
+      const i = tabs.findIndex(t => t.rel !== activeRel);
+      tabs.splice(i < 0 ? 0 : i, 1);
+    }
   } else if (page) {
     tab.page = page;
   }
@@ -132,6 +136,16 @@ export function scrollActiveIntoView(host) {
 }
 
 /* ---------- 资料选择器 ---------- */
+/* 当前挂着的选择器模态的关闭函数（路由切换时用来收掉残留的模态） */
+let pickerTeardown = null;
+
+/* 关掉还挂着的资料选择器（路由切换时调用，避免模态残留在新页面上） */
+export function closeActivePicker() {
+  if (pickerTeardown) {
+    try { pickerTeardown(); } catch { /* noop */ }
+  }
+}
+
 /* files: [{rel, name, course, kind}]；onPick(file) */
 export function pickFile(files, onPick) {
   const back = document.createElement("div");
@@ -176,7 +190,12 @@ export function pickFile(files, onPick) {
     if (curEl && curEl.scrollIntoView) curEl.scrollIntoView({ block: "nearest" });
   };
 
-  const done = () => { document.removeEventListener("keydown", onKey, true); back.remove(); };
+  const done = () => {
+    document.removeEventListener("keydown", onKey, true);
+    back.remove();
+    if (pickerTeardown === done) pickerTeardown = null;   // 只有还登记着才清（防误清新模态）
+  };
+  pickerTeardown = done;
 
   const onKey = e => {
     if (e.key === "Escape") { e.preventDefault(); done(); return; }

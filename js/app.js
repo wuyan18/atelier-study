@@ -5,6 +5,7 @@ import { renderReader } from "./reader.js";
 import { renderCompare } from "./assignment.js";
 import { renderSearch } from "./search.js";
 import { renderExams, updateExamBadge } from "./exams.js";
+import { closeActivePicker } from "./tabs.js";
 
 const $ = (s, r = document) => r.querySelector(s);
 
@@ -326,6 +327,7 @@ function hashParams(h) {
 
 export function route() {
   const main = $("#main");
+  closeActivePicker();   // 路由切换：收掉可能还挂着的资料选择器（分屏/加号模态）
   if (cleanupFn) { try { cleanupFn(); } catch (e) { /* 忽略清理异常 */ } cleanupFn = null; }
   const token = ++routeToken;
   const h = location.hash || "#/";
@@ -514,6 +516,9 @@ async function init() {
   if (verNo && G.config && G.config.version) verNo.textContent = G.config.version;
 
   window.addEventListener("hashchange", route);
+  /* 返回/前进到相同 hash 时 hashchange 不触发，路由清理不会跑，
+     还挂着的资料选择器模态会残留在页面上 —— popstate 兜底收掉 */
+  window.addEventListener("popstate", closeActivePicker);
 
   try {
     await getTree();
