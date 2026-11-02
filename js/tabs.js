@@ -164,6 +164,9 @@ export function pickFile(files, onPick) {
       <div class="modal-foot"><span class="picker-hint">↑↓ 选择 · Enter 打开 · Esc 关闭</span></div>
     </div>`;
   document.body.appendChild(back);
+  /* 渐显：.modal-back 默认 opacity:0，必须补上 .in 才可见
+     （否则模态不可见却盖住整页，按钮全部「失灵」—— exams.js 的弹窗同款写法） */
+  requestAnimationFrame(() => { if (back.isConnected) back.classList.add("in"); });
 
   const input = back.querySelector("input");
   const list = back.querySelector(".picker-list");

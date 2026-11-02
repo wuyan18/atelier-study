@@ -1360,12 +1360,15 @@ body.side-collapsed .nav-count {
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--panel-soft);
+  /* 允许收缩：窗口不够宽时搜索框先变窄，而不是向左溢出压住翻页/缩放按钮 */
+  min-width: 0; overflow: hidden;
   transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
 .reader-searchbar:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-08); }
-.reader-searchbar .ico { width: 13px; height: 13px; color: var(--faint); }
+.reader-searchbar .ico { width: 13px; height: 13px; color: var(--faint); flex: none; }
 .r-search {
-  width: 128px;
+  width: clamp(70px, 12vw, 128px);
+  min-width: 0;
   border: 0; outline: 0; background: transparent;
   font-size: 12px; color: var(--ink);
 }
@@ -1493,6 +1496,8 @@ body.side-collapsed .nav-count {
   transition: background var(--t-fast), color var(--t-fast);
 }
 .reader-toolbar .r-zoom-label:hover { background: var(--accent-08); color: var(--accent-deep); }
+/* 首页/末页时禁用对应翻页按钮：给出「到头了」的明确反馈而不是无响应 */
+.tb-icon-btn:disabled { opacity: .35; pointer-events: none; }
 
 /* ---------- 分屏阅读（主文件 + 对照文件并排） ---------- */
 .reader-body.has-split .pdf-scroll { flex: 1 1 50%; }
@@ -2774,8 +2779,8 @@ pre[class*="line-numbers"] { position: relative; }
 }
 
 /* 阅读器工具栏在窄窗口下换行：第一行返回/标题/搜索，第二行翻页与缩放
-   （不换行时搜索框会向左溢出，压住缩放按钮） */
-@media (max-width: 900px) {
+   （901-1050px 区间工具栏过挤，搜索框会向左溢出压住缩放按钮，故阈值取 1000px） */
+@media (max-width: 1000px) {
   .reader-toolbar {
     height: auto; flex-wrap: wrap; row-gap: 6px;
     padding: 7px 10px 9px;

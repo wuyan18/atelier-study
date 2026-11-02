@@ -315,6 +315,7 @@ function initTabs(tabHost, node, splitCtx) {
             splitCtx.openAlongside(f.rel);                                   // 保住当前对照
             return;
           }
+          if (f.rel === node.rel) { toast("已在当前标签页打开"); return; }  // 选了当前文件：明确反馈而不是无响应
           location.hash = `#/read?path=${encodeURIComponent(f.rel)}`;
         });
       },
@@ -426,7 +427,7 @@ export class PdfViewer {
         <button class="tb-icon-btn sm r-prev" title="上一页">${svgIco("i-chev-left")}</button>
         <input class="r-page" type="number" min="1" value="1" aria-label="页码" />
         <span class="t-info"><span class="r-total">/ —</span></span>
-        <button class="tb-icon-btn sm r-next" title="下一页">${svgIco("i-chev-left")}</button>
+        <button class="tb-icon-btn sm r-next" title="下一页">${svgIco("i-chev-right")}</button>
         <span class="t-sep"></span>
         <button class="tb-icon-btn sm r-zoom-out" title="缩小">${svgIco("i-minus")}</button>
         <span class="t-info r-zoom-label">100%</span>
@@ -584,6 +585,7 @@ export class PdfViewer {
     this._els.total.textContent = `/ ${this.pdf.numPages}`;
     this._els.page.max = this.pdf.numPages;
     this._els.page.value = this.currentPage;
+    this._updateNavState();
 
     const frag = document.createDocumentFragment();
     for (let i = 1; i <= this.pdf.numPages; i++) {
@@ -640,6 +642,7 @@ export class PdfViewer {
       this._scrollTimer = setTimeout(() => {
         this.currentPage = this._currentPageFromScroll();
         this._els.page.value = this.currentPage;
+        this._updateNavState();
         this._prefetchNeighbors();
         if (this.mode === "full") {
           setProgress(this.node.rel, { page: this.currentPage, total: this.pdf.numPages });
@@ -806,6 +809,7 @@ export class PdfViewer {
       sc.scrollLeft = Math.max(0, nw.offsetLeft - sc.offsetLeft + relX * nw.offsetWidth - localX);
       this.currentPage = pageNo;
       this._els.page.value = pageNo;
+      this._updateNavState();
     }
   }
 
@@ -861,6 +865,15 @@ export class PdfViewer {
 
   _updateZoomLabel() {
     this._els.zoomLabel.textContent = Math.round(this.scale * 100) + "%";
+  }
+
+  /* 首页禁用「上一页」、末页禁用「下一页」：到边界时给可见反馈 */
+  _updateNavState() {
+    if (!this.pdf) return;
+    const prev = this.chrome && this.chrome.querySelector(".r-prev");
+    const next = this.chrome && this.chrome.querySelector(".r-next");
+    if (prev) prev.disabled = this.currentPage <= 1;
+    if (next) next.disabled = this.currentPage >= this.pdf.numPages;
   }
 
   _scrollToPage(n, behavior = "smooth") {
@@ -953,6 +966,7 @@ export class PdfViewer {
     if (n === this.currentPage) return;
     this.currentPage = n;
     this._els.page.value = n;
+    this._updateNavState();
     this._scrollToPage(n);
     if (this.mode === "full") {
       setProgress(this.node.rel, { page: n, total: this.pdf.numPages });
