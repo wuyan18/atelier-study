@@ -468,5 +468,6 @@
 - 标签状态存在 `sessionStorage`，关闭浏览器标签页后不保留（有意：避免长期堆积）。
 - 标签上限 8 个，达到上限时提示先关闭。
 - 缩放上限 600%、下限 10%，未提供页面旋转与双页视图。
+- 推送通道：本机 `github.com:443` 常被阻断（`git push` 报 `Failed to connect to github.com port 443`），而 `api.github.com` 可达。备用方案是 `python tools/gh_api_push.py "提交信息"` —— 用 git 数据 API 建 blob/tree/commit 并移动 `main`，只上传内容变化的 blob。代价是远端提交 sha 与本地不同（tree 一致），之后 `git push` 恢复可用时需先 `git fetch` 对齐。
 
 
